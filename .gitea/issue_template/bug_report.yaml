@@ -1,0 +1,43 @@
+name: Bug Report
+about: Report something that isn't working correctly
+labels:
+  - bug
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: How can we reproduce this?
+      placeholder: |
+        1. Run `fj ...`
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: fj version
+      description: Output of `fj version`
+    validations:
+      required: false
+  - type: input
+    id: forgejo-version
+    attributes:
+      label: Forgejo server version
+      description: If relevant
+    validations:
+      required: false
