@@ -13,6 +13,7 @@ mod actions;
 mod auth;
 mod completion;
 mod issues;
+mod milestone;
 mod org;
 mod prs;
 mod release;
@@ -55,6 +56,7 @@ pub enum Command {
     #[clap(subcommand)]
     Auth(auth::AuthCommand),
     Release(release::ReleaseCommand),
+    Milestone(milestone::MilestoneCommand),
     Tag(tag::TagCommand),
     User(user::UserCommand),
     Org(org::OrgCommand),
@@ -73,6 +75,7 @@ impl Command {
             Command::WhoAmI(command) => command.run(keys, host_name).await?,
             Command::Auth(subcommand) => subcommand.run(keys, host_name).await?,
             Command::Release(subcommand) => subcommand.run(keys, host_name).await?,
+            Command::Milestone(subcommand) => subcommand.run(keys, host_name).await?,
             Command::Tag(subcommand) => subcommand.run(keys, host_name).await?,
             Command::User(subcommand) => subcommand.run(keys, host_name).await?,
             Command::Org(subcommand) => subcommand.run(keys, host_name).await?,

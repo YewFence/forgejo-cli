@@ -41,6 +41,9 @@ pub enum PrSubcommand {
         /// Filter PRs by state. Default: open
         #[clap(long, short)]
         state: Option<crate::issues::State>,
+        /// Filter by milestone name
+        #[clap(long, short = 'M')]
+        milestone: Option<String>,
         /// The repo to search in
         #[clap(long, short)]
         repo: Option<RepoArg>,
@@ -73,6 +76,9 @@ pub enum PrSubcommand {
         /// include a list of every commit's message.
         #[clap(short = 'A', long, alias = "fill")]
         autofill: bool,
+        /// Milestone to assign (name or numeric ID)
+        #[clap(long, short = 'M')]
+        milestone: Option<String>,
         /// The repo to create this pull request on
         #[clap(long, short)]
         repo: Option<RepoArg>,
@@ -301,6 +307,7 @@ impl PrCommand {
                 body,
                 body_file,
                 autofill,
+                milestone,
                 repo: _,
                 web,
                 agit,
@@ -314,6 +321,7 @@ impl PrCommand {
                     body,
                     body_file,
                     autofill,
+                    milestone,
                     web,
                     agit,
                     repo_info.remote_name(),
@@ -367,8 +375,9 @@ impl PrCommand {
                 creator,
                 assignee,
                 state,
+                milestone,
                 repo: _,
-            } => view_prs(repo, &api, query, labels, creator, assignee, state).await?,
+            } => view_prs(repo, &api, query, labels, creator, assignee, state, milestone).await?,
             Edit { pr, command } => {
                 let pr = pr.map(|pr| pr.number);
                 match command {
@@ -566,6 +575,12 @@ pub async fn view_pr(repo: &RepoName, api: &Forgejo, id: Option<i64>) -> eyre::R
         println!("Into `{base_name}`");
     } else {
         println!("From `{head_name}` into `{base_name}`");
+    }
+
+    if let Some(ms) = &pr.milestone {
+        if let Some(title) = ms.title.as_deref() {
+            println!("Milestone: {title}");
+        }
     }
 
     crate::render_label_list(pr.labels.as_deref().unwrap_or_default())?;
@@ -854,6 +869,7 @@ async fn create_pr(
     body: Option<String>,
     body_file: Option<PathBuf>,
     autofill: bool,
+    milestone: Option<String>,
     web: bool,
     agit: bool,
     remote_name: Option<&str>,
@@ -988,6 +1004,15 @@ async fn create_pr(
             Some(ref path) => Some(crate::read_file_or_stdin(path).await?),
         };
         let body = body.or(body_from_file);
+        let milestone_id = match &milestone {
+            Some(ms) => Some(
+                crate::milestone::find_milestone(api, repo, ms)
+                    .await?
+                    .id
+                    .ok_or_else(|| eyre::eyre!("milestone does not have id"))?,
+            ),
+            None => None,
+        };
         match head.zip(head_branch_name) {
             Some((head, head_branch_name)) => {
                 let base_opt = CreatePullRequestOption {
@@ -998,7 +1023,7 @@ async fn create_pr(
                     due_date: None,
                     head: Some(head.clone()),
                     labels: None,
-                    milestone: None,
+                    milestone: milestone_id,
                     title: None,
                 };
                 let opt = if let Some((template_file, is_yaml)) =
@@ -1434,6 +1459,7 @@ async fn view_prs(
     creator: Option<String>,
     assignee: Option<String>,
     state: Option<crate::issues::State>,
+    milestone: Option<String>,
 ) -> eyre::Result<()> {
     let labels = labels
         .map(|s| s.split(',').map(|s| s.to_string()).collect::<Vec<_>>())
@@ -1445,7 +1471,7 @@ async fn view_prs(
         assigned_by: assignee,
         state: state.map(|s| s.into()),
         r#type: Some(forgejo_api::structs::IssueListIssuesQueryType::Pulls),
-        milestones: None,
+        milestones: milestone,
         since: None,
         before: None,
         mentioned_by: None,

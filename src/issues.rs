@@ -46,6 +46,9 @@ pub enum IssueSubcommand {
         /// If the repo has disabled blank issues, this will fail.
         #[clap(long, conflicts_with = "template")]
         no_template: bool,
+        /// Milestone to assign (name or numeric ID)
+        #[clap(long, short = 'M')]
+        milestone: Option<String>,
         /// The repo to create this issue on
         #[clap(long, short)]
         repo: Option<RepoArg>,
@@ -92,6 +95,9 @@ pub enum IssueSubcommand {
         /// Filter issues by state. Default: open
         #[clap(long, short)]
         state: Option<State>,
+        /// Filter by milestone name
+        #[clap(long, short = 'M')]
+        milestone: Option<String>,
     },
     /// View an issue's info
     View {
@@ -222,6 +228,7 @@ impl IssueCommand {
                 body_file,
                 template,
                 no_template,
+                milestone,
                 web,
             } => {
                 create_issue(
@@ -232,6 +239,7 @@ impl IssueCommand {
                     body_file,
                     template,
                     no_template,
+                    milestone,
                     web,
                 )
                 .await?
@@ -248,7 +256,8 @@ impl IssueCommand {
                 creator,
                 assignee,
                 state,
-            } => view_issues(repo, &api, query, labels, creator, assignee, state).await?,
+                milestone,
+            } => view_issues(repo, &api, query, labels, creator, assignee, state, milestone).await?,
             Templates { .. } => view_issue_templates(repo, &api).await?,
             Edit { issue, command } => match command {
                 EditCommand::Title { new_title } => {
@@ -343,6 +352,7 @@ async fn create_issue(
     body_file: Option<PathBuf>,
     template: Option<String>,
     no_template: bool,
+    milestone: Option<String>,
     web: bool,
 ) -> eyre::Result<()> {
     match (title, web) {
@@ -352,6 +362,16 @@ async fn create_issue(
                 Some(ref path) => Some(crate::read_file_or_stdin(path).await?),
             };
             let body = body.or(body_from_file);
+
+            let milestone_id = match &milestone {
+                Some(ms) => Some(
+                    crate::milestone::find_milestone(api, repo, ms)
+                        .await?
+                        .id
+                        .ok_or_else(|| eyre::eyre!("milestone does not have id"))?,
+                ),
+                None => None,
+            };
 
             let has_templates = api
                 .repo_get_issue_templates(repo.owner(), repo.name())
@@ -384,7 +404,7 @@ async fn create_issue(
                     closed: None,
                     due_date: None,
                     labels: maybe_label_names_to_ids(repo, api, metadata.labels).await?,
-                    milestone: None,
+                    milestone: milestone_id,
                     r#ref: metadata.r#ref,
                 }
             } else {
@@ -419,7 +439,7 @@ async fn create_issue(
                     closed: None,
                     due_date: None,
                     labels: None,
-                    milestone: None,
+                    milestone: milestone_id,
                     r#ref: None,
                 }
             };
@@ -505,6 +525,12 @@ pub async fn view_issue(repo: &RepoName, api: &Forgejo, id: i64) -> eyre::Result
         StateType::Closed => println!("{bright_red}Closed{reset}"),
     };
 
+    if let Some(ms) = &issue.milestone {
+        if let Some(title) = ms.title.as_deref() {
+            println!("Milestone: {title}");
+        }
+    }
+
     crate::render_label_list(&issue.labels.unwrap_or_default())?;
 
     if let Some(body) = &issue.body {
@@ -530,6 +556,7 @@ async fn view_issues(
     creator: Option<String>,
     assignee: Option<String>,
     state: Option<State>,
+    milestone: Option<String>,
 ) -> eyre::Result<()> {
     let labels = labels
         .map(|s| s.split(',').map(|s| s.to_string()).collect::<Vec<_>>())
@@ -541,7 +568,7 @@ async fn view_issues(
         assigned_by: assignee,
         state: state.map(|s| s.into()),
         r#type: None,
-        milestones: None,
+        milestones: milestone,
         since: None,
         before: None,
         mentioned_by: None,
