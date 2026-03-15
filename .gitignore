@@ -2,3 +2,6 @@
 
 # Nix output
 /result*
+
+# Internal context
+FORK_CONTEXT.md
