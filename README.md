@@ -34,6 +34,7 @@ Works alongside `git` to handle the Forgejo-specific stuff: issues, PRs, milesto
 
 **Project:**
 - Full command reference in the README
+- Better support for agentic AI workflows (structured output, scriptable commands)
 - Open to contributions
 
 ---
