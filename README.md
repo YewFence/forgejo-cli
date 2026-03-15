@@ -36,8 +36,12 @@ cargo build --release
 ## Getting started
 
 ```sh
-fj auth login                        # OAuth via browser
+# First time: log in to your Forgejo instance
+# Use -H if you're not inside a repo that points to it
+fj -H codeberg.org auth login        # opens browser for OAuth
 fj whoami                            # verify it worked
+
+# Then use it from any repo with a Forgejo remote
 fj repo clone owner/repo             # clone something
 fj issue create "title goes here"    # file an issue
 fj pr create "fix the thing"         # open a PR from current branch
@@ -45,7 +49,7 @@ fj pr status --wait                  # watch CI
 fj pr merge 42                       # merge it
 ```
 
-`fj` figures out which Forgejo instance to talk to from your git remotes. Override with `--host` or `--repo`. Set `FJ_FALLBACK_HOST` for when you're not in a repo.
+`fj` figures out which Forgejo instance to talk to from your git remotes. If you're not in a repo, use `-H <host>` or set `FJ_FALLBACK_HOST`.
 
 Output is colorized in terminals, plain when piped. Force plain with `--style minimal`.
 
