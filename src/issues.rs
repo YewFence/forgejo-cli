@@ -202,6 +202,15 @@ pub enum EditCommand {
         #[clap(long, short)]
         rm: Vec<String>,
     },
+    /// Edit an issue's assignees
+    Assignees {
+        /// Usernames to add as assignees.
+        #[clap(long, short)]
+        add: Vec<String>,
+        /// Usernames to remove from assignees.
+        #[clap(long, short)]
+        rm: Vec<String>,
+    },
 }
 
 #[derive(Subcommand, Clone, Debug)]
@@ -271,6 +280,9 @@ impl IssueCommand {
                 }
                 EditCommand::Labels { add, rm } => {
                     crate::edit_labels(repo, &api, issue.number, add, rm).await?;
+                }
+                EditCommand::Assignees { add, rm } => {
+                    edit_assignees(repo, &api, issue.number, add, rm).await?;
                 }
             },
             Close { issue, with_msg } => close_issue(repo, &api, issue.number, with_msg).await?,
@@ -907,6 +919,54 @@ pub async fn edit_comment(
         },
     )
     .await?;
+    Ok(())
+}
+
+async fn edit_assignees(
+    repo: &RepoName,
+    api: &Forgejo,
+    issue: i64,
+    add: Vec<String>,
+    rm: Vec<String>,
+) -> eyre::Result<()> {
+    let issue_data = api
+        .issue_get_issue(repo.owner(), repo.name(), issue)
+        .await?;
+    let mut assignees: Vec<String> = issue_data
+        .assignees
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|u| u.login.clone())
+        .collect();
+
+    for name in &rm {
+        assignees.retain(|a| a != name);
+    }
+    for name in add {
+        if !assignees.iter().any(|a| a == &name) {
+            assignees.push(name);
+        }
+    }
+
+    api.issue_edit_issue(
+        repo.owner(),
+        repo.name(),
+        issue,
+        EditIssueOption {
+            assignees: Some(assignees),
+            assignee: None,
+            body: None,
+            due_date: None,
+            milestone: None,
+            r#ref: None,
+            state: None,
+            title: None,
+            unset_due_date: None,
+            updated_at: None,
+        },
+    )
+    .await?;
+    println!("updated assignees for issue #{issue}");
     Ok(())
 }
 
