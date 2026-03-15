@@ -37,8 +37,11 @@ cargo build --release
 
 ```sh
 # First time: log in to your Forgejo instance
-# Use -H if you're not inside a repo that points to it
-fj -H codeberg.org auth login        # opens browser for OAuth
+# 1. Create a token at https://<your-instance>/user/settings/applications
+# 2. Add it (use -H if you're not inside a repo that points to your instance):
+fj -H codeberg.org auth add-key <your-username>
+# paste the token when prompted
+
 fj whoami                            # verify it worked
 
 # Then use it from any repo with a Forgejo remote
