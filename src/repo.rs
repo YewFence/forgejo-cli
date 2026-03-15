@@ -1147,26 +1147,29 @@ async fn view_repo(api: &Forgejo, repo: &RepoName) -> eyre::Result<()> {
 }
 
 async fn view_repo_readme(api: &Forgejo, repo: &RepoName) -> eyre::Result<()> {
-    let query = forgejo_api::structs::RepoGetRawFileQuery { r#ref: None };
-    let file = api
-        .repo_get_raw_file(repo.owner(), repo.name(), "README.md", query)
-        .await;
-    if let Ok(readme) = file {
-        let readme_str = String::from_utf8_lossy(&readme);
-        println!("{}", crate::markdown(&readme_str));
-        return Ok(());
-    } else {
-        let query = forgejo_api::structs::RepoGetRawFileQuery { r#ref: None };
-        let file = api
-            .repo_get_raw_file(repo.owner(), repo.name(), "README.txt", query)
-            .await;
-        if let Ok(readme) = file {
-            let readme_str = String::from_utf8_lossy(&readme);
-            println!("{}", crate::render_text(&readme_str));
+    let candidates: &[(&str, fn(&str) -> String)] = &[
+        ("README.md", crate::markdown),
+        ("readme.md", crate::markdown),
+        ("Readme.md", crate::markdown),
+        ("README", crate::markdown),
+        ("readme", crate::markdown),
+        ("README.txt", crate::render_text),
+        ("readme.txt", crate::render_text),
+        ("Readme.txt", crate::render_text),
+    ];
+
+    for &(filename, render) in candidates {
+        if let Ok(content) = api
+            .repo_get_raw_file(repo.owner(), repo.name(), filename, Default::default())
+            .await
+        {
+            let text = String::from_utf8_lossy(&content);
+            println!("{}", render(&text));
             return Ok(());
         }
     }
-    eyre::bail!("Repo does not have README.md or README.txt");
+
+    eyre::bail!("Repo does not have a README file");
 }
 
 async fn cmd_clone_repo(
