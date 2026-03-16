@@ -79,46 +79,47 @@ impl WikiCommand {
 }
 
 async fn wiki_contents(repo: &RepoName, api: &Forgejo) -> eyre::Result<()> {
-    let SpecialRender { bullet, .. } = *crate::special_render();
-
     let pages = api
         .repo_get_wiki_pages(repo.owner(), repo.name())
         .all()
         .await?;
-    for page in pages {
-        let title = page
-            .title
-            .as_deref()
-            .ok_or_eyre("page does not have title")?;
-        println!("{bullet} {title}");
-    }
+
+    crate::output::print_list(
+        &pages,
+        &["TITLE"],
+        |page| {
+            vec![page.title.as_deref().unwrap_or("?").to_string()]
+        },
+    );
 
     Ok(())
 }
 
 async fn view_wiki_page(repo: &RepoName, api: &Forgejo, page: &str) -> eyre::Result<()> {
-    let SpecialRender { bold, reset, .. } = *crate::special_render();
-
     let page = api
         .repo_get_wiki_page(repo.owner(), repo.name(), page)
         .await?;
 
-    let title = page
-        .title
-        .as_deref()
-        .ok_or_eyre("page does not have title")?;
-    println!("{bold}{title}{reset}");
-    println!();
+    crate::output::print_or_json(&page, || {
+        let SpecialRender { bold, reset, .. } = *crate::special_render();
 
-    let contents_b64 = page
-        .content_base64
-        .as_deref()
-        .ok_or_eyre("page does not have content")?;
-    let contents = String::from_utf8(base64ct::Base64::decode_vec(contents_b64)?)
-        .wrap_err("page content is not utf-8")?;
+        let title = page
+            .title
+            .as_deref()
+            .ok_or_eyre("page does not have title")?;
+        println!("{bold}{title}{reset}");
+        println!();
 
-    println!("{}", crate::markdown(&contents));
-    Ok(())
+        let contents_b64 = page
+            .content_base64
+            .as_deref()
+            .ok_or_eyre("page does not have content")?;
+        let contents = String::from_utf8(base64ct::Base64::decode_vec(contents_b64)?)
+            .wrap_err("page content is not utf-8")?;
+
+        println!("{}", crate::markdown(&contents));
+        Ok(())
+    })
 }
 
 async fn browse_wiki_page(repo: &RepoName, api: &Forgejo, page: &str) -> eyre::Result<()> {

@@ -90,14 +90,14 @@ async fn create_tag(
         target: branch,
     };
     api.repo_create_tag(repo.owner(), repo.name(), opt).await?;
-    println!("created tag {name}");
+    crate::output::success(&format!("Created tag {name}"));
     Ok(())
 }
 
 async fn delete_tag(repo: &RepoName, api: &Forgejo, name: String) -> eyre::Result<()> {
     api.repo_delete_tag(repo.owner(), repo.name(), &name)
         .await?;
-    println!("deleted tag {name}");
+    crate::output::success(&format!("Deleted tag {name}"));
     Ok(())
 }
 
@@ -107,23 +107,34 @@ async fn list_tags(repo: &RepoName, api: &Forgejo, page: u32) -> eyre::Result<()
         .page(page)
         .page_size(20)
         .await?;
-    for tag in tags {
-        println!("{}", tag.name.as_deref().unwrap_or("<missing>"));
-    }
+    crate::output::print_list(
+        &tags,
+        &["NAME", "MESSAGE"],
+        |tag| {
+            vec![
+                tag.name.as_deref().unwrap_or("?").to_string(),
+                tag.message.as_deref().unwrap_or("").to_string(),
+            ]
+        },
+    );
     Ok(())
 }
 
 async fn view_tag(repo: &RepoName, api: &Forgejo, name: String) -> eyre::Result<()> {
     let tag = api.repo_get_tag(repo.owner(), repo.name(), &name).await?;
-    let name = tag.name.as_deref().ok_or_eyre("tag does not have name")?;
-    let id = tag.id.as_deref().ok_or_eyre("tag does not have name")?;
 
-    let crate::SpecialRender { bold, reset, .. } = crate::special_render();
-    println!("{bold}{name}{reset}");
-    println!("{id}");
-    if let Some(msg) = &tag.message {
-        println!();
-        println!("{}", crate::markdown(msg));
-    }
+    crate::output::print_or_json(&tag, || {
+        let name = tag.name.as_ref().ok_or_eyre("tag does not have name")?;
+        let id = tag.id.as_ref().ok_or_eyre("tag does not have id")?;
+
+        let crate::SpecialRender { bold, reset, .. } = crate::special_render();
+        println!("{bold}{name}{reset}");
+        println!("{id}");
+        if let Some(msg) = &tag.message {
+            println!();
+            println!("{}", crate::markdown(msg));
+        }
+        Ok(())
+    })?;
     Ok(())
 }

@@ -54,9 +54,9 @@ impl AuthCommand {
             AuthCommand::Logout { host } => {
                 let info_opt = keys.hosts.remove(&host);
                 if let Some(info) = info_opt {
-                    eprintln!("signed out of {}@{}", &info.username(), host);
+                    crate::output::success(&format!("Signed out of {}@{}", info.username(), host));
                 } else {
-                    eprintln!("already not signed in to {host}");
+                    crate::output::info(&format!("Already not signed in to {host}"));
                 }
             }
             AuthCommand::AddKey { user, key } => {
@@ -75,35 +75,35 @@ impl AuthCommand {
                     add_ssh_alias(&mut login, host_url, keys).await;
                     keys.hosts.insert(host.to_owned(), login);
                 } else {
-                    println!("key for {host} already exists");
+                    crate::output::info(&format!("Key for {host} already exists"));
                 }
             }
             AuthCommand::UseSsh { use_ssh } => {
                 let repo_info = crate::repo::RepoInfo::get_current(host_name, None, None, &keys)?;
                 let host = crate::host_name(&repo_info.host_url());
                 if !keys.hosts.contains_key(host) {
-                    println!("not logged in to {host}");
+                    crate::output::error(&format!("Not logged in to {host}"));
                 } else {
                     if use_ssh.unwrap_or(true) {
                         let already_present = keys.default_ssh.insert(host.to_string());
                         if already_present {
-                            println!("now will use SSH for {host} by default");
+                            crate::output::success(&format!("Now using SSH for {host} by default"));
                         } else {
-                            println!("already using SSH for {host} by default");
+                            crate::output::info(&format!("Already using SSH for {host} by default"));
                         }
                     } else {
                         let was_present = keys.default_ssh.remove(host);
                         if was_present {
-                            println!("will no longer use SSH for {host} by default");
+                            crate::output::success(&format!("No longer using SSH for {host} by default"));
                         } else {
-                            println!("already not using SSH for {host} by default");
+                            crate::output::info(&format!("Already not using SSH for {host} by default"));
                         }
                     }
                 }
             }
             AuthCommand::List => {
                 if keys.hosts.is_empty() {
-                    println!("No logins.");
+                    crate::output::info("No logins.");
                 }
                 for (host_url, login_info) in &keys.hosts {
                     println!("{}@{}", login_info.username(), host_url);
@@ -241,7 +241,7 @@ async fn oauth_login(
             }
         }
         Ok(None) => {
-            println!("Login canceled");
+            crate::output::info("Login canceled");
             return Ok(());
         }
         Err(e) => {
@@ -315,7 +315,7 @@ fn auth_server() -> (
                             "code" => code = Some(value),
                             "state" => state = Some(value),
                             "error_description" => error_description = Some(value),
-                            _ => eprintln!("unknown key {key} {value}"),
+                            _ => crate::output::info(&format!("Unknown key {key} {value}")),
                         }
                     }
                 }

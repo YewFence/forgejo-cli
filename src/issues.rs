@@ -466,7 +466,7 @@ async fn create_issue(
                 .title
                 .as_ref()
                 .ok_or_else(|| eyre::eyre!("issue does not have title"))?;
-            eprintln!("created issue #{}: {}", number, title);
+            crate::output::success(&format!("Created issue #{number}: {title}"));
         }
         (None, true) => {
             let base_repo = api.repo_get(repo.owner(), repo.name()).await?;
@@ -491,18 +491,6 @@ async fn create_issue(
 }
 
 pub async fn view_issue(repo: &RepoName, api: &Forgejo, id: i64) -> eyre::Result<()> {
-    let crate::SpecialRender {
-        dash,
-
-        bright_red,
-        bright_green,
-        yellow,
-        dark_grey,
-        white,
-        reset,
-        ..
-    } = crate::special_render();
-
     let issue = api.issue_get_issue(repo.owner(), repo.name(), id).await?;
 
     // if it's a pull request, display it as one instead
@@ -511,53 +499,69 @@ pub async fn view_issue(repo: &RepoName, api: &Forgejo, id: i64) -> eyre::Result
         return Ok(());
     }
 
-    let title = issue
-        .title
-        .as_ref()
-        .ok_or_else(|| eyre::eyre!("issue does not have title"))?;
-    let user = issue
-        .user
-        .as_ref()
-        .ok_or_else(|| eyre::eyre!("issue does not have creator"))?;
-    let username = user
-        .login
-        .as_ref()
-        .ok_or_else(|| eyre::eyre!("user does not have login"))?;
-    let state = issue
-        .state
-        .ok_or_else(|| eyre::eyre!("pr does not have state"))?;
-    let comments = issue.comments.unwrap_or_default();
+    crate::output::print_or_json(&issue, || {
+        let crate::SpecialRender {
+            dash,
 
-    println!("{yellow}{title} {dark_grey}#{id}{reset}");
-    print!("By {white}{username}{reset} {dash} ");
+            bright_red,
+            bright_green,
+            yellow,
+            dark_grey,
+            white,
+            reset,
+            ..
+        } = crate::special_render();
 
-    use forgejo_api::structs::StateType;
-    match state {
-        StateType::Open => println!("{bright_green}Open{reset}"),
-        StateType::Closed => println!("{bright_red}Closed{reset}"),
-    };
+        let title = issue
+            .title
+            .as_ref()
+            .ok_or_else(|| eyre::eyre!("issue does not have title"))?;
+        let user = issue
+            .user
+            .as_ref()
+            .ok_or_else(|| eyre::eyre!("issue does not have creator"))?;
+        let username = user
+            .login
+            .as_ref()
+            .ok_or_else(|| eyre::eyre!("user does not have login"))?;
+        let state = issue
+            .state
+            .as_ref()
+            .ok_or_else(|| eyre::eyre!("issue does not have state"))?;
+        let comments = issue.comments.unwrap_or_default();
 
-    if let Some(ms) = &issue.milestone {
-        if let Some(title) = ms.title.as_deref() {
-            println!("Milestone: {title}");
+        println!("{yellow}{title} {dark_grey}#{id}{reset}");
+        print!("By {white}{username}{reset} {dash} ");
+
+        use forgejo_api::structs::StateType;
+        match state {
+            &StateType::Open => println!("{bright_green}Open{reset}"),
+            &StateType::Closed => println!("{bright_red}Closed{reset}"),
+        };
+
+        if let Some(ms) = &issue.milestone {
+            if let Some(title) = ms.title.as_deref() {
+                println!("Milestone: {title}");
+            }
         }
-    }
 
-    crate::render_label_list(&issue.labels.unwrap_or_default())?;
+        crate::render_label_list(&issue.labels.clone().unwrap_or_default())?;
 
-    if let Some(body) = &issue.body {
-        if !body.is_empty() {
-            println!();
-            println!("{}", crate::markdown(body));
+        if let Some(body) = &issue.body {
+            if !body.is_empty() {
+                println!();
+                println!("{}", crate::markdown(body));
+            }
         }
-    }
-    println!();
+        println!();
 
-    if comments == 1 {
-        println!("1 comment");
-    } else {
-        println!("{comments} comments");
-    }
+        if comments == 1 {
+            println!("1 comment");
+        } else {
+            println!("{comments} comments");
+        }
+        Ok(())
+    })?;
     Ok(())
 }
 async fn view_issues(
@@ -590,91 +594,117 @@ async fn view_issues(
         .issue_list_issues(repo.owner(), repo.name(), query)
         .all()
         .await?;
-    if issues.len() == 1 {
-        println!("1 issue");
-    } else {
-        println!("{} issues", issues.len());
-    }
-    for issue in issues {
-        let number = issue
-            .number
-            .ok_or_else(|| eyre::eyre!("issue does not have number"))?;
-        let title = issue
-            .title
-            .as_ref()
-            .ok_or_else(|| eyre::eyre!("issue does not have title"))?;
-        let user = issue
-            .user
-            .as_ref()
-            .ok_or_else(|| eyre::eyre!("issue does not have creator"))?;
-        let username = user
-            .login
-            .as_ref()
-            .ok_or_else(|| eyre::eyre!("user does not have login"))?;
-        println!("#{}: {} (by {})", number, title, username);
-    }
+    crate::output::print_list(
+        &issues,
+        &["ID", "STATE", "TITLE", "LABELS", "ASSIGNEE", "AGE"],
+        |issue| {
+            let number = issue.number.map(|n| format!("#{n}")).unwrap_or_default();
+            let state = issue
+                .state
+                .as_ref()
+                .map(crate::output::colored_state)
+                .unwrap_or_default();
+            let title = issue.title.as_deref().unwrap_or("").to_string();
+            let labels = issue
+                .labels
+                .as_ref()
+                .map(|ls| {
+                    ls.iter()
+                        .filter_map(|l| l.name.as_deref())
+                        .collect::<Vec<_>>()
+                        .join(",")
+                })
+                .unwrap_or_default();
+            let assignee = issue
+                .assignee
+                .as_ref()
+                .and_then(|u| u.login.as_deref())
+                .map(|u| format!("@{u}"))
+                .unwrap_or_default();
+            let age = issue
+                .created_at
+                .as_ref()
+                .map(crate::output::relative_time)
+                .unwrap_or_default();
+            vec![number, state, title, labels, assignee, age]
+        },
+    );
     Ok(())
 }
 
 pub async fn view_issue_templates(repo: &RepoName, api: &Forgejo) -> eyre::Result<()> {
-    let crate::SpecialRender {
-        dash, bold, reset, ..
-    } = crate::special_render();
-
-    let mut total_count = 0;
-
-    if let Ok(templates) = api
+    let templates = api
         .repo_get_issue_templates(repo.owner(), repo.name())
         .await
-    {
-        total_count += templates.len();
-        for template in templates {
-            let filename = template
-                .file_name
-                .as_deref()
-                .ok_or_eyre("template does not have filename")?;
-            let name = filename
-                .rsplit_once(".")
-                .map(|(s, _)| s)
-                .unwrap_or(filename);
-            let name = name.rsplit_once("/").map(|(_, s)| s).unwrap_or(name);
-            let display_name = template.name.as_deref().filter(|s| !s.is_empty());
-            print!("{bold}{name}{reset}");
-            if let Some(display_name) = display_name {
-                print!(" {dash} {display_name}");
-            }
-            println!();
-            let desc = template.about.as_deref().filter(|s| !s.is_empty());
-            if let Some(desc) = desc {
-                println!("{}", crate::render_text(desc));
-            }
-            println!();
-        }
-    }
-
+        .unwrap_or_default();
     let config = api.repo_get_issue_config(repo.owner(), repo.name()).await?;
-    let contact_links = config.contact_links.unwrap_or_default();
-    total_count += contact_links.len();
-    for contact in contact_links {
-        let url = contact.url.ok_or_eyre("contact info does not have url")?;
-        let name = contact.name.ok_or_eyre("contact info does not have name")?;
-        println!("{bold}{url}{reset} {dash} {name}");
-        let desc = contact.about.as_deref().filter(|s| !s.is_empty());
-        if let Some(desc) = desc {
-            println!("{}", crate::render_text(desc));
-        }
-        println!();
-    }
+    let contact_links = config.contact_links.clone().unwrap_or_default();
 
-    if total_count == 0 {
-        eprintln!("No issue templates or contact info.");
-    }
-    if config.blank_issues_enabled.unwrap_or(true) {
-        println!("'--no-template' is allowed");
-    } else {
-        println!("'--no-template' is not allowed");
-    }
-    Ok(())
+    crate::output::print_or_json(
+        &serde_json::json!({
+            "templates": templates,
+            "contact_links": contact_links,
+        }),
+        || {
+            let crate::SpecialRender {
+                dash, bold, reset, ..
+            } = crate::special_render();
+
+            let mut total_count = 0;
+
+            total_count += templates.len();
+            for template in &templates {
+                let filename = template
+                    .file_name
+                    .as_deref()
+                    .ok_or_eyre("template does not have filename")?;
+                let name = filename
+                    .rsplit_once(".")
+                    .map(|(s, _)| s)
+                    .unwrap_or(filename);
+                let name = name.rsplit_once("/").map(|(_, s)| s).unwrap_or(name);
+                let display_name = template.name.as_deref().filter(|s| !s.is_empty());
+                print!("{bold}{name}{reset}");
+                if let Some(display_name) = display_name {
+                    print!(" {dash} {display_name}");
+                }
+                println!();
+                let desc = template.about.as_deref().filter(|s| !s.is_empty());
+                if let Some(desc) = desc {
+                    println!("{}", crate::render_text(desc));
+                }
+                println!();
+            }
+
+            total_count += contact_links.len();
+            for contact in &contact_links {
+                let url = contact
+                    .url
+                    .as_ref()
+                    .ok_or_eyre("contact info does not have url")?;
+                let name = contact
+                    .name
+                    .as_deref()
+                    .ok_or_eyre("contact info does not have name")?;
+                println!("{bold}{url}{reset} {dash} {name}");
+                let desc = contact.about.as_deref().filter(|s| !s.is_empty());
+                if let Some(desc) = desc {
+                    println!("{}", crate::render_text(desc));
+                }
+                println!();
+            }
+
+            if total_count == 0 {
+                crate::output::info("No issue templates or contact info.");
+            }
+            if config.blank_issues_enabled.unwrap_or(true) {
+                println!("'--no-template' is allowed");
+            } else {
+                println!("'--no-template' is not allowed");
+            }
+            Ok(())
+        },
+    )
 }
 
 pub async fn view_comment(repo: &RepoName, api: &Forgejo, id: i64, idx: usize) -> eyre::Result<()> {
@@ -700,11 +730,13 @@ pub async fn view_comments(repo: &RepoName, api: &Forgejo, id: i64) -> eyre::Res
     let (_, comments) = api
         .issue_get_comments(repo.owner(), repo.name(), id, query)
         .await?;
-    for comment in comments {
-        print_comment(&comment)?;
-        println!();
-    }
-    Ok(())
+    crate::output::print_or_json(&comments, || {
+        for comment in &comments {
+            print_comment(comment)?;
+            println!();
+        }
+        Ok(())
+    })
 }
 
 fn print_comment(comment: &Comment) -> eyre::Result<()> {
@@ -784,6 +816,7 @@ pub async fn add_comment(
         },
     )
     .await?;
+    crate::output::success(&format!("Added comment on issue #{issue}"));
     Ok(())
 }
 
@@ -831,6 +864,7 @@ pub async fn edit_title(
         },
     )
     .await?;
+    crate::output::success(&format!("Updated title for issue #{issue}"));
     Ok(())
 }
 
@@ -871,6 +905,7 @@ pub async fn edit_body(
         },
     )
     .await?;
+    crate::output::success(&format!("Updated body for issue #{issue}"));
     Ok(())
 }
 
@@ -919,6 +954,7 @@ pub async fn edit_comment(
         },
     )
     .await?;
+    crate::output::success(&format!("Updated comment on issue #{issue}"));
     Ok(())
 }
 
@@ -966,7 +1002,7 @@ async fn edit_assignees(
         },
     )
     .await?;
-    println!("updated assignees for issue #{issue}");
+    crate::output::success(&format!("Updated assignees for issue #{issue}"));
     Ok(())
 }
 
@@ -1006,16 +1042,10 @@ pub async fn close_issue(
         unset_due_date: None,
         updated_at: None,
     };
-    let issue_data = api
-        .issue_edit_issue(repo.owner(), repo.name(), issue, edit)
+    api.issue_edit_issue(repo.owner(), repo.name(), issue, edit)
         .await?;
 
-    let issue_title = issue_data
-        .title
-        .as_deref()
-        .ok_or_eyre("issue does not have title")?;
-
-    println!("Closed issue {issue}: \"{issue_title}\"");
+    crate::output::success(&format!("Closed issue #{issue}"));
 
     Ok(())
 }

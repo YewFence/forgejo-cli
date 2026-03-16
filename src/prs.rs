@@ -478,125 +478,118 @@ impl PrCommand {
 }
 
 pub async fn view_pr(repo: &RepoName, api: &Forgejo, id: Option<i64>) -> eyre::Result<()> {
-    let crate::SpecialRender {
-        dash,
-
-        bright_red,
-        bright_green,
-        bright_magenta,
-        yellow,
-        dark_grey,
-        light_grey,
-        white,
-        reset,
-        ..
-    } = crate::special_render();
     let pr = try_get_pr(repo, api, id).await?;
     let id = pr.number.ok_or_eyre("pr does not have number")?;
-    let repo = repo_name_from_pr(&pr)?;
 
-    let mut additions = 0;
-    let mut deletions = 0;
-    let query = RepoGetPullRequestFilesQuery {
-        ..Default::default()
-    };
-    let files = api
-        .repo_get_pull_request_files(repo.owner(), repo.name(), id, query)
-        .all()
-        .await?;
-    for file in files {
-        additions += file.additions.unwrap_or_default();
-        deletions += file.deletions.unwrap_or_default();
-    }
-    let title = pr
-        .title
-        .as_deref()
-        .ok_or_else(|| eyre::eyre!("pr does not have title"))?;
-    let title_no_wip = title
-        .strip_prefix("WIP: ")
-        .or_else(|| title.strip_prefix("WIP:"));
-    let (title, is_draft) = match title_no_wip {
-        Some(title) => (title, true),
-        None => (title, false),
-    };
-    let state = pr
-        .state
-        .ok_or_else(|| eyre::eyre!("pr does not have state"))?;
-    let is_merged = pr.merged.unwrap_or_default();
-    let state = match state {
-        StateType::Open if is_draft => format!("{light_grey}Draft{reset}"),
-        StateType::Open => format!("{bright_green}Open{reset}"),
-        StateType::Closed if is_merged => format!("{bright_magenta}Merged{reset}"),
-        StateType::Closed => format!("{bright_red}Closed{reset}"),
-    };
-    let base = pr.base.as_ref().ok_or_eyre("pr does not have base")?;
-    let base_repo = base
-        .repo
-        .as_ref()
-        .ok_or_eyre("base does not have repo")?
-        .full_name
-        .as_deref()
-        .ok_or_eyre("base repo does not have name")?;
-    let base_name = base
-        .label
-        .as_deref()
-        .ok_or_eyre("base does not have label")?;
-    let head = pr.head.as_ref().ok_or_eyre("pr does not have head")?;
-    let head_repo = head
-        .repo
-        .as_ref()
-        .ok_or_eyre("head does not have repo")?
-        .full_name
-        .as_deref()
-        .ok_or_eyre("head repo does not have name")?;
-    let head_name = head
-        .label
-        .as_deref()
-        .ok_or_eyre("head does not have label")?;
-    let head_name = if base_repo != head_repo {
-        format!("{head_repo}:{head_name}")
-    } else {
-        head_name.to_owned()
-    };
-    let user = pr
-        .user
-        .as_ref()
-        .ok_or_else(|| eyre::eyre!("pr does not have creator"))?;
-    let username = user
-        .login
-        .as_ref()
-        .ok_or_else(|| eyre::eyre!("user does not have login"))?;
-    let comments = pr.comments.unwrap_or_default();
-    println!("{yellow}{title}{reset} {dark_grey}#{id}{reset}");
-    println!(
-        "By {white}{username}{reset} {dash} {state} {dash} {bright_green}+{additions} {bright_red}-{deletions}{reset}"
-    );
-    if head_name.is_empty() {
-        println!("Into `{base_name}`");
-    } else {
-        println!("From `{head_name}` into `{base_name}`");
-    }
+    crate::output::print_or_json(&pr, || {
+        let crate::SpecialRender {
+            dash,
 
-    if let Some(ms) = &pr.milestone {
-        if let Some(title) = ms.title.as_deref() {
-            println!("Milestone: {title}");
+            bright_red,
+            bright_green,
+            bright_magenta,
+            yellow,
+            dark_grey,
+            light_grey,
+            white,
+            reset,
+            ..
+        } = crate::special_render();
+
+        let additions = pr.additions.unwrap_or_default();
+        let deletions = pr.deletions.unwrap_or_default();
+
+        let title = pr
+            .title
+            .as_deref()
+            .ok_or_else(|| eyre::eyre!("pr does not have title"))?;
+        let title_no_wip = title
+            .strip_prefix("WIP: ")
+            .or_else(|| title.strip_prefix("WIP:"));
+        let (title, is_draft) = match title_no_wip {
+            Some(title) => (title, true),
+            None => (title, false),
+        };
+        let state = pr
+            .state
+            .ok_or_else(|| eyre::eyre!("pr does not have state"))?;
+        let is_merged = pr.merged.unwrap_or_default();
+        let state = match state {
+            StateType::Open if is_draft => format!("{light_grey}Draft{reset}"),
+            StateType::Open => format!("{bright_green}Open{reset}"),
+            StateType::Closed if is_merged => format!("{bright_magenta}Merged{reset}"),
+            StateType::Closed => format!("{bright_red}Closed{reset}"),
+        };
+        let base = pr.base.as_ref().ok_or_eyre("pr does not have base")?;
+        let base_repo = base
+            .repo
+            .as_ref()
+            .ok_or_eyre("base does not have repo")?
+            .full_name
+            .as_deref()
+            .ok_or_eyre("base repo does not have name")?;
+        let base_name = base
+            .label
+            .as_deref()
+            .ok_or_eyre("base does not have label")?;
+        let head = pr.head.as_ref().ok_or_eyre("pr does not have head")?;
+        let head_repo = head
+            .repo
+            .as_ref()
+            .ok_or_eyre("head does not have repo")?
+            .full_name
+            .as_deref()
+            .ok_or_eyre("head repo does not have name")?;
+        let head_name = head
+            .label
+            .as_deref()
+            .ok_or_eyre("head does not have label")?;
+        let head_name = if base_repo != head_repo {
+            format!("{head_repo}:{head_name}")
+        } else {
+            head_name.to_owned()
+        };
+        let user = pr
+            .user
+            .as_ref()
+            .ok_or_else(|| eyre::eyre!("pr does not have creator"))?;
+        let username = user
+            .login
+            .as_ref()
+            .ok_or_else(|| eyre::eyre!("user does not have login"))?;
+        let comments = pr.comments.unwrap_or_default();
+        println!("{yellow}{title}{reset} {dark_grey}#{id}{reset}");
+        println!(
+            "By {white}{username}{reset} {dash} {state} {dash} {bright_green}+{additions} {bright_red}-{deletions}{reset}"
+        );
+        if head_name.is_empty() {
+            println!("Into `{base_name}`");
+        } else {
+            println!("From `{head_name}` into `{base_name}`");
         }
-    }
 
-    crate::render_label_list(pr.labels.as_deref().unwrap_or_default())?;
-
-    if let Some(body) = &pr.body {
-        if !body.trim().is_empty() {
-            println!();
-            println!("{}", crate::markdown(body));
+        if let Some(ms) = &pr.milestone {
+            if let Some(title) = ms.title.as_deref() {
+                println!("Milestone: {title}");
+            }
         }
-    }
-    println!();
-    if comments == 1 {
-        println!("1 comment");
-    } else {
-        println!("{comments} comments");
-    }
+
+        crate::render_label_list(pr.labels.as_deref().unwrap_or_default())?;
+
+        if let Some(body) = &pr.body {
+            if !body.trim().is_empty() {
+                println!();
+                println!("{}", crate::markdown(body));
+            }
+        }
+        println!();
+        if comments == 1 {
+            println!("1 comment");
+        } else {
+            println!("{comments} comments");
+        }
+        Ok(())
+    })?;
     Ok(())
 }
 
@@ -819,6 +812,7 @@ async fn edit_pr_labels(
 
     crate::edit_labels(&repo, api, pr_number, add, rm).await?;
 
+    crate::output::success(&format!("Updated labels for PR #{pr_number}"));
     Ok(())
 }
 
@@ -998,6 +992,7 @@ async fn create_pr(
             .expect("invalid url")
             .extend(["compare", &format!("{base}...{head}")]);
         open::that_detached(pr_create_url.as_str()).wrap_err("Failed to open URL")?;
+        crate::output::info(&format!("Opened {pr_create_url} in browser"));
     } else {
         let body_from_file = match body_file {
             None => None,
@@ -1096,7 +1091,7 @@ async fn create_pr(
                     .title
                     .as_ref()
                     .ok_or_else(|| eyre::eyre!("pr does not have title"))?;
-                println!("created pull request #{}: {}", number, title);
+                crate::output::success(&format!("Created PR #{number}: {title}"));
             }
             // no head means agit
             None => {
@@ -1207,7 +1202,7 @@ async fn create_pr(
                 // needed so the mutable reference later is valid
                 drop(push_options);
 
-                println!("created new PR: \"{title}\"");
+                crate::output::success(&format!("Created PR: \"{title}\""));
 
                 let merge_setting_name = format!("branch.{current_branch_name}.merge");
                 let remote_setting_name = format!("branch.{current_branch_name}.remote");
@@ -1347,7 +1342,9 @@ async fn merge_pr(
         .label
         .as_ref()
         .ok_or_eyre("base does not have label")?;
-    println!("Merged PR #{pr_number} \"{pr_title}\" into `{base_label}`");
+    crate::output::success(&format!(
+        "Merged PR #{pr_number} \"{pr_title}\" into `{base_label}`"
+    ));
     Ok(())
 }
 
@@ -1441,11 +1438,11 @@ async fn checkout_pr(
         .unwrap();
 
     let pr_title = pull_data.title.as_deref().ok_or_eyre("pr has no title")?;
-    println!("Checked out PR #{}: {pr_title}", pr.number());
+    crate::output::success(&format!("Checked out PR #{}: {pr_title}", pr.number()));
     if branch_is_new {
-        println!("On new branch {branch_name}");
+        crate::output::info(&format!("On new branch {branch_name}"));
     } else {
-        println!("Updated branch to latest commit");
+        crate::output::info("Updated branch to latest commit");
     }
 
     Ok(())
@@ -1481,29 +1478,41 @@ async fn view_prs(
         .issue_list_issues(repo.owner(), repo.name(), query)
         .all()
         .await?;
-    if prs.len() == 1 {
-        println!("1 pull request");
-    } else {
-        println!("{} pull requests", prs.len());
-    }
-    for pr in prs {
-        let number = pr
-            .number
-            .ok_or_else(|| eyre::eyre!("pr does not have number"))?;
-        let title = pr
-            .title
-            .as_ref()
-            .ok_or_else(|| eyre::eyre!("pr does not have title"))?;
-        let user = pr
-            .user
-            .as_ref()
-            .ok_or_else(|| eyre::eyre!("pr does not have creator"))?;
-        let username = user
-            .login
-            .as_ref()
-            .ok_or_else(|| eyre::eyre!("user does not have login"))?;
-        println!("#{}: {} (by {})", number, title, username);
-    }
+    crate::output::print_list(
+        &prs,
+        &["ID", "STATE", "TITLE", "LABELS", "ASSIGNEE", "AGE"],
+        |pr| {
+            let number = pr.number.map(|n| format!("#{n}")).unwrap_or_default();
+            let state = pr
+                .state
+                .as_ref()
+                .map(crate::output::colored_state)
+                .unwrap_or_default();
+            let title = pr.title.as_deref().unwrap_or("").to_string();
+            let labels = pr
+                .labels
+                .as_ref()
+                .map(|ls| {
+                    ls.iter()
+                        .filter_map(|l| l.name.as_deref())
+                        .collect::<Vec<_>>()
+                        .join(",")
+                })
+                .unwrap_or_default();
+            let assignee = pr
+                .assignee
+                .as_ref()
+                .and_then(|u| u.login.as_deref())
+                .map(|u| format!("@{u}"))
+                .unwrap_or_default();
+            let age = pr
+                .created_at
+                .as_ref()
+                .map(crate::output::relative_time)
+                .unwrap_or_default();
+            vec![number, state, title, labels, assignee, age]
+        },
+    );
     Ok(())
 }
 
@@ -1531,7 +1540,7 @@ async fn view_diff(
         let mut view = diff.clone();
         crate::editor(&mut view, Some(diff_type)).await?;
         if view != diff {
-            println!("changes made to the diff will not persist");
+            crate::output::info("Changes made to the diff will not persist");
         }
     } else {
         println!("{diff}");
@@ -1684,6 +1693,7 @@ pub async fn browse_pr(repo: &RepoName, api: &Forgejo, id: i64) -> eyre::Result<
         .as_ref()
         .ok_or_else(|| eyre::eyre!("pr does not have html_url"))?;
     open::that_detached(html_url.as_str()).wrap_err("Failed to open URL")?;
+    crate::output::info(&format!("Opened {html_url} in browser"));
     Ok(())
 }
 

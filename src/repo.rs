@@ -228,7 +228,7 @@ fn fallback_host() -> Option<Url> {
     if let Some(envvar) = std::env::var_os("FJ_FALLBACK_HOST") {
         let out = envvar.to_str().and_then(|x| x.parse::<Url>().ok());
         if out.is_none() {
-            println!("warn: `FJ_FALLBACK_HOST` is not set to a valid url");
+            crate::output::info("FJ_FALLBACK_HOST is not set to a valid url");
         }
         out
     } else {
@@ -569,7 +569,7 @@ impl RepoCommand {
                     .name()
                     .ok_or_eyre("couldn't get repo name, please specify")?;
                 api.user_current_put_star(name.owner(), name.name()).await?;
-                println!("Starred {}/{}!", name.owner(), name.name());
+                crate::output::success(&format!("Starred {}/{}", name.owner(), name.name()));
             }
             RepoCommand::Unstar { repo, remote } => {
                 let repo =
@@ -580,7 +580,7 @@ impl RepoCommand {
                     .ok_or_eyre("couldn't get repo name, please specify")?;
                 api.user_current_delete_star(name.owner(), name.name())
                     .await?;
-                println!("Removed star from {}/{}", name.owner(), name.name());
+                crate::output::success(&format!("Removed star from {}/{}", name.owner(), name.name()));
             }
             RepoCommand::Delete { repo } => {
                 let repo = RepoInfo::get_current(host_name, Some(&repo), None, &keys)?;
@@ -782,7 +782,7 @@ pub async fn create_repo(
         .html_url
         .as_ref()
         .ok_or_else(|| eyre::eyre!("new_repo does not have html_url"))?;
-    println!("created new repo at {}", html_url);
+    crate::output::success(&format!("Created repo at {html_url}"));
 
     if remote.is_some() || push {
         let repo = git2::Repository::discover(".")?;
@@ -825,12 +825,12 @@ async fn fork_repo(api: &Forgejo, repo: &RepoName, name: Option<String>) -> eyre
         .full_name
         .as_deref()
         .ok_or_eyre("fork does not have name")?;
-    println!(
+    crate::output::success(&format!(
         "Forked {}/{} into {}",
         repo.owner(),
         repo.name(),
         fork_full_name
-    );
+    ));
 
     Ok(())
 }
@@ -1025,13 +1025,13 @@ async fn migrate_repo(
         wiki: Some(include.wiki),
     };
 
-    println!("Migrating...");
+    crate::output::info("Migrating...");
     let new_repo = api.repo_migrate(migrate_options).await?;
     let new_repo_url = new_repo
         .html_url
         .as_ref()
         .ok_or_eyre("new repo doesnt have url")?;
-    println!("Done! View online at {new_repo_url}");
+    crate::output::success(&format!("Done! View online at {new_repo_url}"));
 
     Ok(())
 }
@@ -1039,111 +1039,113 @@ async fn migrate_repo(
 async fn view_repo(api: &Forgejo, repo: &RepoName) -> eyre::Result<()> {
     let repo = api.repo_get(repo.owner(), repo.name()).await?;
 
-    let SpecialRender {
-        dash,
-        body_prefix,
-        dark_grey,
-        reset,
-        ..
-    } = crate::special_render();
+    crate::output::print_or_json(&repo, || {
+        let SpecialRender {
+            dash,
+            body_prefix,
+            dark_grey,
+            reset,
+            ..
+        } = crate::special_render();
 
-    println!("{}", repo.full_name.ok_or_eyre("no full name")?);
+        println!("{}", repo.full_name.as_ref().ok_or_eyre("no full name")?);
 
-    if let Some(parent) = &repo.parent {
-        println!(
-            "Fork of {}",
-            parent.full_name.as_ref().ok_or_eyre("no full name")?
-        );
-    }
-    if repo.mirror == Some(true) {
-        if let Some(original) = &repo.original_url {
-            println!("Mirror of {original}")
+        if let Some(parent) = &repo.parent {
+            println!(
+                "Fork of {}",
+                parent.full_name.as_ref().ok_or_eyre("no full name")?
+            );
         }
-    }
-    let desc = repo.description.as_deref().unwrap_or_default();
-    // Don't use body::markdown, this is plain text.
-    if !desc.is_empty() {
-        if desc.lines().count() > 1 {
+        if repo.mirror == Some(true) {
+            if let Some(original) = &repo.original_url {
+                println!("Mirror of {original}")
+            }
+        }
+        let desc = repo.description.as_deref().unwrap_or_default();
+        // Don't use body::markdown, this is plain text.
+        if !desc.is_empty() {
+            if desc.lines().count() > 1 {
+                println!();
+            }
+            for line in desc.lines() {
+                println!("{dark_grey}{body_prefix}{reset} {line}");
+            }
+        }
+        println!();
+
+        let lang = repo.language.as_deref().unwrap_or_default();
+        if !lang.is_empty() {
+            println!("Primary language is {lang}");
+        }
+
+        let stars = repo.stars_count.unwrap_or_default();
+        if stars == 1 {
+            print!("{stars} star {dash} ");
+        } else {
+            print!("{stars} stars {dash} ");
+        }
+
+        let watchers = repo.watchers_count.unwrap_or_default();
+        print!("{watchers} watching {dash} ");
+
+        let forks = repo.forks_count.unwrap_or_default();
+        if forks == 1 {
+            print!("{forks} fork");
+        } else {
+            print!("{forks} forks");
+        }
+        println!();
+
+        let mut first = true;
+        if repo.has_issues.unwrap_or_default() && repo.external_tracker.is_none() {
+            let issues = repo.open_issues_count.unwrap_or_default();
+            if issues == 1 {
+                print!("{issues} issue");
+            } else {
+                print!("{issues} issues");
+            }
+            first = false;
+        }
+        if repo.has_pull_requests.unwrap_or_default() {
+            if !first {
+                print!(" {dash} ");
+            }
+            let pulls = repo.open_pr_counter.unwrap_or_default();
+            if pulls == 1 {
+                print!("{pulls} PR");
+            } else {
+                print!("{pulls} PRs");
+            }
+            first = false;
+        }
+        if repo.has_releases.unwrap_or_default() {
+            if !first {
+                print!(" {dash} ");
+            }
+            let releases = repo.release_counter.unwrap_or_default();
+            if releases == 1 {
+                print!("{releases} release");
+            } else {
+                print!("{releases} releases");
+            }
+            first = false;
+        }
+        if !first {
             println!();
         }
-        for line in desc.lines() {
-            println!("{dark_grey}{body_prefix}{reset} {line}");
+        if let Some(external_tracker) = &repo.external_tracker {
+            if let Some(tracker_url) = &external_tracker.external_tracker_url {
+                println!("Issue tracker is at {tracker_url}");
+            }
         }
-    }
-    println!();
 
-    let lang = repo.language.as_deref().unwrap_or_default();
-    if !lang.is_empty() {
-        println!("Primary language is {lang}");
-    }
-
-    let stars = repo.stars_count.unwrap_or_default();
-    if stars == 1 {
-        print!("{stars} star {dash} ");
-    } else {
-        print!("{stars} stars {dash} ");
-    }
-
-    let watchers = repo.watchers_count.unwrap_or_default();
-    print!("{watchers} watching {dash} ");
-
-    let forks = repo.forks_count.unwrap_or_default();
-    if forks == 1 {
-        print!("{forks} fork");
-    } else {
-        print!("{forks} forks");
-    }
-    println!();
-
-    let mut first = true;
-    if repo.has_issues.unwrap_or_default() && repo.external_tracker.is_none() {
-        let issues = repo.open_issues_count.unwrap_or_default();
-        if issues == 1 {
-            print!("{issues} issue");
-        } else {
-            print!("{issues} issues");
+        if let Some(html_url) = &repo.html_url {
+            println!();
+            println!("View online at {html_url}");
         }
-        first = false;
-    }
-    if repo.has_pull_requests.unwrap_or_default() {
-        if !first {
-            print!(" {dash} ");
-        }
-        let pulls = repo.open_pr_counter.unwrap_or_default();
-        if pulls == 1 {
-            print!("{pulls} PR");
-        } else {
-            print!("{pulls} PRs");
-        }
-        first = false;
-    }
-    if repo.has_releases.unwrap_or_default() {
-        if !first {
-            print!(" {dash} ");
-        }
-        let releases = repo.release_counter.unwrap_or_default();
-        if releases == 1 {
-            print!("{releases} release");
-        } else {
-            print!("{releases} releases");
-        }
-        first = false;
-    }
-    if !first {
-        println!();
-    }
-    if let Some(external_tracker) = &repo.external_tracker {
-        if let Some(tracker_url) = &external_tracker.external_tracker_url {
-            println!("Issue tracker is at {tracker_url}");
-        }
-    }
 
-    if let Some(html_url) = &repo.html_url {
-        println!();
-        println!("View online at {html_url}");
-    }
-
-    Ok(())
+        Ok(())
+    })
 }
 
 async fn view_repo_readme(api: &Forgejo, repo: &RepoName) -> eyre::Result<()> {
@@ -1286,7 +1288,7 @@ pub fn clone_repo(
     if fancy {
         print!("{clear_line}{show_cursor}\r");
     }
-    println!("Cloned {} into {}", repo_name, path.display());
+    crate::output::success(&format!("Cloned {} into {}", repo_name, path.display()));
     Ok(local_repo)
 }
 
@@ -1318,9 +1320,9 @@ async fn delete_repo(api: &Forgejo, name: &RepoName) -> eyre::Result<()> {
     let yes = matches!(user_response.trim(), "y" | "Y" | "yes" | "Yes");
     if yes {
         api.repo_delete(name.owner(), name.name()).await?;
-        println!("Deleted {}/{}", name.owner(), name.name());
+        crate::output::success(&format!("Deleted {}/{}", name.owner(), name.name()));
     } else {
-        println!("Did not delete");
+        crate::output::info("Did not delete");
     }
     Ok(())
 }
@@ -1379,10 +1381,10 @@ async fn create_repo_label(
         )
         .await?;
 
-    println!(
-        "Successfully created label {}",
+    crate::output::success(&format!(
+        "Created label {}",
         crate::render_label(&label)?,
-    );
+    ));
     Ok(())
 }
 
@@ -1392,7 +1394,7 @@ async fn delete_repo_label(api: &Forgejo, repo: &RepoName, name: String) -> eyre
     api.issue_delete_label(repo.owner(), repo.name(), id)
         .await?;
 
-    println!("Successfully deleted label {name}.");
+    crate::output::success(&format!("Deleted label {name}"));
     Ok(())
 }
 
@@ -1423,7 +1425,7 @@ async fn edit_repo_label(
         )
         .await?;
 
-    println!("Edited label: {}", crate::render_label(&label)?);
+    crate::output::success(&format!("Edited label: {}", crate::render_label(&label)?));
 
     Ok(())
 }

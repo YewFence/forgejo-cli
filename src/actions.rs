@@ -1,20 +1,14 @@
-use std::{collections::BTreeMap, fmt::Display};
+use std::collections::BTreeMap;
 
 use clap::{Args, Subcommand};
 use eyre::{bail, OptionExt};
 use forgejo_api::{
-    structs::{
-        ActionVariable, CreateOrUpdateSecretOption, CreateVariableOption, UpdateVariableOption,
-    },
+    structs::{CreateOrUpdateSecretOption, CreateVariableOption, UpdateVariableOption},
     Forgejo, ForgejoError,
 };
 use hyper::StatusCode;
-use time::Duration;
 
-use crate::{
-    repo::{RepoArg, RepoInfo, RepoName},
-    SpecialRender,
-};
+use crate::repo::{RepoArg, RepoInfo, RepoName};
 
 #[derive(Args, Clone, Debug)]
 pub struct ActionsCommand {
@@ -165,64 +159,65 @@ async fn view_tasks(repo: &RepoName, api: &Forgejo, page: u32) -> eyre::Result<(
         .page_size(20)
         .await?;
 
-    if res.total_count == Some(1) {
-        println!("1 task");
-    } else {
-        println!("{} tasks", res.total_count.unwrap_or(0));
-    }
+    let tasks = res.workflow_runs.unwrap_or_default();
 
-    let SpecialRender {
+    crate::output::print_list(
+        &tasks,
+        &["#", "STATUS", "NAME", "TITLE", "SHA", "EVENT", "TIME"],
+        |task| {
+            let run_number = task
+                .run_number
+                .map(|n| n.to_string())
+                .unwrap_or_else(|| "?".to_string());
+
+            let status = colored_task_status(task.status.as_deref());
+
+            let name = task.name.as_deref().unwrap_or("").to_string();
+            let title = task.display_title.as_deref().unwrap_or("").to_string();
+
+            let sha = task.head_sha.as_deref().unwrap_or("");
+            let sha = if sha.len() > 10 { &sha[0..10] } else { sha };
+            let sha = sha.to_string();
+
+            let event = task.event.as_deref().unwrap_or("").to_string();
+
+            let time = if let (Some(end), Some(start)) = (task.updated_at, task.run_started_at) {
+                format!("{}", end - start)
+            } else {
+                String::new()
+            };
+
+            vec![run_number, status, name, title, sha, event, time]
+        },
+    );
+
+    Ok(())
+}
+
+fn colored_task_status(status: Option<&str>) -> String {
+    let crate::SpecialRender {
         fancy,
         reset,
-
-        bold,
         bright_green,
         light_grey,
         bright_red,
         yellow,
-        bright_blue,
         ..
     } = *crate::special_render();
 
-    for task in res.workflow_runs.unwrap_or_default() {
-        let task_sym = match task.status.as_deref() {
-            // Don't use symbols when we're not in fancy mode.
-            x if !fancy => x.unwrap_or("?"),
-
-            // See: https://codeberg.org/forgejo/forgejo/src/commit/5380f23daba969057d9afc53c3dc746eca95188c/models/actions/status.go#L26
-            Some("success") => &format!("{bright_green}✓{reset}"),
-            Some("cancelled") => &format!("{light_grey}!{reset}"),
-            Some("failure") => &format!("{bright_red}×{reset}"),
-            Some("waiting") => &format!("{light_grey}{reset}"),
-            Some("running") => &format!("{yellow}●{reset}"),
-            Some("skipped") => &format!("{light_grey}{reset}"),
-            Some("blocked") => &format!("{bright_red}{reset}"),
-            Some(x) => x,
-            None => "?",
-        };
-
-        let sha = task.head_sha.unwrap_or_default();
-        let sha = if sha.len() > 10 { &sha[0..10] } else { &sha };
-
-        let time = if let (Some(end), Some(start)) = (task.updated_at, task.run_started_at) {
-            end - start
-        } else {
-            Duration::default()
-        };
-
-        println!(
-            "#{bold}{}{reset} ({bright_blue}{}{reset}) {} {} {bright_green}{}{reset} ({}): {yellow}{}{reset}",
-            task.run_number.unwrap_or(0),
-            sha,
-            task_sym,
-            task.name.unwrap_or_default(),
-            time,
-            task.event.unwrap_or_default(),
-            task.display_title.unwrap_or_default(),
-        );
+    match status {
+        x if !fancy => x.unwrap_or("?").to_string(),
+        // See: https://codeberg.org/forgejo/forgejo/src/commit/5380f23daba969057d9afc53c3dc746eca95188c/models/actions/status.go#L26
+        Some("success") => format!("{bright_green}success{reset}"),
+        Some("cancelled") => format!("{light_grey}cancelled{reset}"),
+        Some("failure") => format!("{bright_red}failure{reset}"),
+        Some("waiting") => format!("{light_grey}waiting{reset}"),
+        Some("running") => format!("{yellow}running{reset}"),
+        Some("skipped") => format!("{light_grey}skipped{reset}"),
+        Some("blocked") => format!("{bright_red}blocked{reset}"),
+        Some(x) => x.to_string(),
+        None => "?".to_string(),
     }
-
-    Ok(())
 }
 
 async fn list_variables(repo: &RepoName, api: &Forgejo, verbose: bool) -> eyre::Result<()> {
@@ -231,8 +226,30 @@ async fn list_variables(repo: &RepoName, api: &Forgejo, verbose: bool) -> eyre::
         .all()
         .await?;
 
-    for var in variables {
-        println!("{}", DisplayActionVariable::new(var, verbose)?);
+    if verbose {
+        crate::output::print_list(
+            &variables,
+            &["NAME", "VALUE", "OWNER_ID", "REPO_ID"],
+            |var| {
+                vec![
+                    var.name.as_deref().unwrap_or("?").to_string(),
+                    var.data.as_deref().unwrap_or("").to_string(),
+                    var.owner_id
+                        .map(|id| id.to_string())
+                        .unwrap_or_else(|| "?".to_string()),
+                    var.repo_id
+                        .map(|id| id.to_string())
+                        .unwrap_or_else(|| "?".to_string()),
+                ]
+            },
+        );
+    } else {
+        crate::output::print_list(&variables, &["NAME", "VALUE"], |var| {
+            vec![
+                var.name.as_deref().unwrap_or("?").to_string(),
+                var.data.as_deref().unwrap_or("").to_string(),
+            ]
+        });
     }
 
     Ok(())
@@ -279,7 +296,7 @@ async fn create_variable(
                 bail!("variable already exists, pass --force to replace it.");
             }
 
-            eprintln!("variable already exists, updating.");
+            crate::output::info("Variable already exists, updating");
             api.update_repo_variable(
                 repo.owner(),
                 repo.name(),
@@ -290,9 +307,12 @@ async fn create_variable(
                 },
             )
             .await?;
+            crate::output::success(&format!("Updated variable {name}"));
         }
         Err(e) => return Err(e.into()),
-        Ok(()) => {}
+        Ok(()) => {
+            crate::output::success(&format!("Created variable {name}"));
+        }
     }
 
     Ok(())
@@ -301,7 +321,7 @@ async fn create_variable(
 async fn delete_variable(repo: &RepoName, api: &Forgejo, name: String) -> eyre::Result<()> {
     api.delete_repo_variable(repo.owner(), repo.name(), &name)
         .await?;
-    println!("Variable {name} deleted.");
+    crate::output::success(&format!("Deleted variable {name}"));
 
     Ok(())
 }
@@ -312,13 +332,16 @@ async fn list_secrets(repo: &RepoName, api: &Forgejo) -> eyre::Result<()> {
         .all()
         .await?;
 
-    for secret in secrets {
-        println!(
-            "({}) {}",
-            crate::DisplayOptional(secret.created_at, "?"),
-            crate::DisplayOptional(secret.name, "?")
-        );
-    }
+    crate::output::print_list(&secrets, &["NAME", "CREATED"], |secret| {
+        vec![
+            secret.name.as_deref().unwrap_or("?").to_string(),
+            secret
+                .created_at
+                .as_ref()
+                .map(crate::output::relative_time)
+                .unwrap_or_else(|| "?".to_string()),
+        ]
+    });
 
     Ok(())
 }
@@ -336,6 +359,7 @@ async fn create_secret(
         CreateOrUpdateSecretOption { data },
     )
     .await?;
+    crate::output::success(&format!("Created secret {name}"));
 
     Ok(())
 }
@@ -343,6 +367,7 @@ async fn create_secret(
 async fn delete_secret(repo: &RepoName, api: &Forgejo, name: String) -> eyre::Result<()> {
     api.delete_repo_secret(repo.owner(), repo.name(), &name)
         .await?;
+    crate::output::success(&format!("Deleted secret {name}"));
 
     Ok(())
 }
@@ -367,54 +392,11 @@ async fn dispatch(
     )
     .await?;
 
-    println!("Dispatched workflow {name} in {ref} with {n_inputs} input(s).");
+    crate::output::success(&format!(
+        "Dispatched workflow {name} in {ref} with {n_inputs} input(s)"
+    ));
 
     Ok(())
-}
-
-struct DisplayActionVariable {
-    name: String,
-    data: String,
-    owner_id: Option<i64>,
-    repo_id: Option<i64>,
-    verbose: bool,
-}
-
-impl DisplayActionVariable {
-    fn new(value: ActionVariable, verbose: bool) -> eyre::Result<Self> {
-        Ok(Self {
-            name: value
-                .name
-                .ok_or_eyre("Server returned ActionVariable without name?!")?,
-            // The API usually (always?) returns Some("") here. The page on variables also notes
-            // that their value cannot be read by other means than being passed to a CI job.
-            data: value.data.unwrap_or_default(),
-            owner_id: value.owner_id,
-            repo_id: value.repo_id,
-            verbose,
-        })
-    }
-}
-
-impl Display for DisplayActionVariable {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.verbose {
-            write!(
-                f,
-                "({}, {}) ",
-                crate::DisplayOptional(self.owner_id, "?"),
-                crate::DisplayOptional(self.repo_id, "?"),
-            )?;
-        }
-
-        write!(f, "{}", self.name)?;
-
-        if !self.data.is_empty() {
-            write!(f, " = {}", self.data)?;
-        }
-
-        Ok(())
-    }
 }
 
 fn parse_dispatch_kvs(s: &str) -> eyre::Result<(String, String)> {

@@ -188,17 +188,13 @@ async fn list_teams(api: &Forgejo, org: String) -> eyre::Result<()> {
     let mut teams = api.org_list_teams(&org).all().await?;
     teams.sort_unstable_by_key(permission_sort_id);
 
-    let SpecialRender {
-        bright_blue,
-        bold,
-        reset,
-        bullet,
-        ..
-    } = crate::special_render();
-    for team in teams {
-        let team_name = team.name.as_deref().ok_or_eyre("team does not have name")?;
-        println!("{bullet} {bold}{bright_blue}{team_name}{reset}");
-    }
+    crate::output::print_list(
+        &teams,
+        &["NAME"],
+        |team| {
+            vec![team.name.as_deref().unwrap_or("?").to_string()]
+        },
+    );
     Ok(())
 }
 
@@ -234,82 +230,86 @@ async fn view_team(
 ) -> eyre::Result<()> {
     let team = find_team_by_name(api, &org, &name).await?;
 
-    let SpecialRender {
-        bright_blue,
-        bright_red,
-        bold,
-        reset,
-        dash,
-        ..
-    } = crate::special_render();
+    crate::output::print_or_json(&team, || {
+        let SpecialRender {
+            bright_blue,
+            bright_red,
+            bold,
+            reset,
+            dash,
+            ..
+        } = crate::special_render();
 
-    print!("{bright_blue}{bold}{name}{reset} {dash} in org {bold}{org}{reset}");
-    if team
-        .permission
-        .is_some_and(|p| p == forgejo_api::structs::TeamPermission::Admin)
-    {
-        print!(" {dash} {bright_red}Admin{reset}");
-    }
-    println!();
-
-    if let Some(description) = &team.description {
-        if !description.is_empty() {
-            println!("\n{}", crate::markdown(description));
+        print!("{bright_blue}{bold}{name}{reset} {dash} in org {bold}{org}{reset}");
+        if team
+            .permission
+            .is_some_and(|p| p == forgejo_api::structs::TeamPermission::Admin)
+        {
+            print!(" {dash} {bright_red}Admin{reset}");
         }
-    }
-
-    if list_permissions {
         println!();
-        let units = team
-            .units_map
-            .as_ref()
-            .ok_or_eyre("team does not have permission units")?;
-        let mut ro_perms = Vec::new();
-        let mut rw_perms = Vec::new();
-        for (unit, permission) in units {
-            match &**permission {
-                "read" => ro_perms.push(unit),
-                "write" | "admin" | "owner" => rw_perms.push(unit),
-                _ => (),
+
+        if let Some(description) = &team.description {
+            if !description.is_empty() {
+                println!("\n{}", crate::markdown(description));
             }
         }
 
-        let get_unit_name = |unit| match unit {
-            "repo.wiki" => "Wikis",
-            "repo.ext_wiki" => "External Wikis",
-            "repo.issues" => "Issues",
-            "repo.ext_issues" => "External Issues",
-            "repo.pulls" => "Pull Requests",
-            "repo.projects" => "Projects",
-            "repo.actions" => "CI",
-            "repo.code" => "Code",
-            "repo.releases" => "Releases",
-            "repo.packages" => "Packages",
-            _ => "Unknown",
-        };
-        if !ro_perms.is_empty() {
-            print!("Read Only: ");
-            for (i, unit) in ro_perms.iter().enumerate() {
-                let unit_name = get_unit_name(unit);
-                if i > 0 {
-                    print!(", ");
-                }
-                print!("{unit_name}");
-            }
+        if list_permissions {
             println!();
-        }
-        if !rw_perms.is_empty() {
-            print!("Read/Write: ");
-            for (i, unit) in rw_perms.iter().enumerate() {
-                let unit_name = get_unit_name(unit);
-                if i != 0 {
-                    print!(", ");
+            let units = team
+                .units_map
+                .as_ref()
+                .ok_or_eyre("team does not have permission units")?;
+            let mut ro_perms = Vec::new();
+            let mut rw_perms = Vec::new();
+            for (unit, permission) in units {
+                match &**permission {
+                    "read" => ro_perms.push(unit),
+                    "write" | "admin" | "owner" => rw_perms.push(unit),
+                    _ => (),
                 }
-                print!("{unit_name}");
             }
-            println!();
+
+            let get_unit_name = |unit| match unit {
+                "repo.wiki" => "Wikis",
+                "repo.ext_wiki" => "External Wikis",
+                "repo.issues" => "Issues",
+                "repo.ext_issues" => "External Issues",
+                "repo.pulls" => "Pull Requests",
+                "repo.projects" => "Projects",
+                "repo.actions" => "CI",
+                "repo.code" => "Code",
+                "repo.releases" => "Releases",
+                "repo.packages" => "Packages",
+                _ => "Unknown",
+            };
+            if !ro_perms.is_empty() {
+                print!("Read Only: ");
+                for (i, unit) in ro_perms.iter().enumerate() {
+                    let unit_name = get_unit_name(unit);
+                    if i > 0 {
+                        print!(", ");
+                    }
+                    print!("{unit_name}");
+                }
+                println!();
+            }
+            if !rw_perms.is_empty() {
+                print!("Read/Write: ");
+                for (i, unit) in rw_perms.iter().enumerate() {
+                    let unit_name = get_unit_name(unit);
+                    if i != 0 {
+                        print!(", ");
+                    }
+                    print!("{unit_name}");
+                }
+                println!();
+            }
         }
-    }
+
+        Ok(())
+    })?;
 
     Ok(())
 }
@@ -371,17 +371,8 @@ async fn create_team(
         .ok_or_eyre("org doesn't have name")?;
     let name = new_team.name.ok_or_eyre("team doesn't have name")?;
 
-    let SpecialRender {
-        bright_blue,
-        bold,
-        reset,
-        ..
-    } = crate::special_render();
-    print!("created new ");
-    if flags.admin {
-        print!("admin ");
-    }
-    println!("team {bright_blue}{bold}{name}{reset} in {bold}{org_name}{reset}");
+    let kind = if flags.admin { "admin team" } else { "team" };
+    crate::output::success(&format!("Created {kind} {name} in {org_name}"));
     Ok(())
 }
 
@@ -399,6 +390,7 @@ async fn edit_team(
     // EditTeamOption's team field is a String rather than Option<String>
     // That should be fixed, but this gets around it for now.
     let new_name = new_name.unwrap_or(name);
+    let display_name = new_name.clone();
     let units = create_unit_map(
         options.read_permissions.as_deref(),
         options.write_permissions.as_deref(),
@@ -416,7 +408,7 @@ async fn edit_team(
         units_map: Some(units),
     };
     api.org_edit_team(id, options).await?;
-
+    crate::output::success(&format!("Updated team {display_name} in {org}"));
     Ok(())
 }
 
@@ -430,9 +422,9 @@ async fn delete_team(api: &Forgejo, org: String, name: String) -> eyre::Result<(
             .id
             .ok_or_eyre("team does not have id")?;
         api.org_delete_team(id).await?;
-        println!("Team deleted.");
+        crate::output::success(&format!("Deleted team {org}/{name}"));
     } else {
-        println!("Team not deleted.");
+        crate::output::info("Team not deleted");
     }
     Ok(())
 }
@@ -495,17 +487,14 @@ async fn list_team_repos(api: &Forgejo, org: String, team: String, page: u32) ->
         .ok_or_eyre("team does not have id")?;
     let (headers, repos) = api.org_list_team_repos(id).page(page).page_size(20).await?;
 
-    let SpecialRender { bullet, .. } = crate::special_render();
-    if repos.is_empty() {
-        println!("No results");
-    } else {
-        for repo in repos {
-            let full_name = repo
-                .full_name
-                .as_deref()
-                .ok_or_eyre("repo does not have full name")?;
-            println!("{bullet} {full_name}");
-        }
+    crate::output::print_list(
+        &repos,
+        &["NAME"],
+        |repo| {
+            vec![repo.full_name.as_deref().unwrap_or("?").to_string()]
+        },
+    );
+    if !repos.is_empty() && !crate::json_mode() {
         let count = headers.x_total_count.unwrap_or_default();
         println!("Page {} of {}", page, (count as u64).div_ceil(20));
     }
@@ -523,13 +512,7 @@ async fn add_repo_to_team(
         .id
         .ok_or_eyre("team does not have id")?;
     api.org_add_team_repository(id, &org, &repo).await?;
-    let SpecialRender {
-        bold,
-        reset,
-        bright_blue,
-        ..
-    } = crate::special_render();
-    println!("Added {bold}{org}/{repo}{reset} to team {bright_blue}{bold}{team}{reset}");
+    crate::output::success(&format!("Added {org}/{repo} to team {team}"));
     Ok(())
 }
 
@@ -544,13 +527,7 @@ async fn remove_repo_from_team(
         .id
         .ok_or_eyre("team does not have id")?;
     api.org_remove_team_repository(id, &org, &repo).await?;
-    let SpecialRender {
-        bold,
-        reset,
-        bright_blue,
-        ..
-    } = crate::special_render();
-    println!("Removed {bold}{org}/{repo}{reset} from team {bright_blue}{bold}{team}{reset}");
+    crate::output::success(&format!("Removed {org}/{repo} from team {team}"));
     Ok(())
 }
 
@@ -619,28 +596,14 @@ async fn list_team_members(
         .page_size(20)
         .await?;
 
-    let SpecialRender {
-        bullet,
-        light_grey,
-        bright_cyan,
-        reset,
-        ..
-    } = crate::special_render();
-    if users.is_empty() {
-        println!("No results");
-    } else {
-        for user in users {
-            let username = user
-                .login
-                .as_deref()
-                .ok_or_eyre("repo does not have full name")?;
-            match user.full_name.as_deref().filter(|s| !s.is_empty()) {
-                Some(full_name) => println!(
-                    "{bullet} {bright_cyan}{full_name}{reset} {light_grey}({username}){reset}"
-                ),
-                None => println!("{bullet} {bright_cyan}{username}{reset}"),
-            }
-        }
+    crate::output::print_list(
+        &users,
+        &["USERNAME"],
+        |user| {
+            vec![user.login.as_deref().unwrap_or("?").to_string()]
+        },
+    );
+    if !users.is_empty() && !crate::json_mode() {
         let count = headers.x_total_count.unwrap_or_default();
         println!("Page {} of {}", page, (count as u64).div_ceil(20));
     }
@@ -658,14 +621,7 @@ async fn add_user_to_team(
         .id
         .ok_or_eyre("team does not have id")?;
     api.org_add_team_member(id, &user).await?;
-    let SpecialRender {
-        bold,
-        reset,
-        bright_blue,
-        bright_cyan,
-        ..
-    } = crate::special_render();
-    println!("Added {bright_cyan}{bold}{user}{reset} to team {bright_blue}{bold}{team}{reset}");
+    crate::output::success(&format!("Added {user} to team {team}"));
     Ok(())
 }
 
@@ -680,13 +636,6 @@ async fn remove_user_from_team(
         .id
         .ok_or_eyre("team does not have id")?;
     api.org_remove_team_member(id, &user).await?;
-    let SpecialRender {
-        bold,
-        reset,
-        bright_blue,
-        bright_cyan,
-        ..
-    } = crate::special_render();
-    println!("Removed {bright_cyan}{bold}{user}{reset} from team {bright_blue}{bold}{team}{reset}");
+    crate::output::success(&format!("Removed {user} from team {team}"));
     Ok(())
 }

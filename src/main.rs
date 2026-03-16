@@ -15,6 +15,7 @@ mod completion;
 mod issues;
 mod milestone;
 mod org;
+mod output;
 mod prs;
 mod release;
 mod repo;
@@ -39,6 +40,9 @@ pub struct App {
     host: Option<String>,
     #[clap(long)]
     style: Option<Style>,
+    /// Output results as JSON (for scripting and agents)
+    #[clap(long)]
+    json: bool,
     #[clap(subcommand)]
     command: Command,
 }
@@ -91,6 +95,7 @@ async fn main() -> eyre::Result<()> {
     let args = App::parse();
 
     let _ = SPECIAL_RENDER.set(SpecialRender::new(args.style.unwrap_or_default()));
+    let _ = JSON_MODE.set(args.json);
 
     let mut keys = KeyInfo::load().await?;
     let r = args.command.run(&mut keys, args.host.as_deref()).await;
@@ -237,6 +242,12 @@ fn repo_url_host_name(url: &url::Url) -> &str {
 use std::sync::OnceLock;
 static SPECIAL_RENDER: OnceLock<SpecialRender> = OnceLock::new();
 
+static JSON_MODE: OnceLock<bool> = OnceLock::new();
+
+fn json_mode() -> bool {
+    *JSON_MODE.get().unwrap_or(&false)
+}
+
 fn special_render() -> &'static SpecialRender {
     SPECIAL_RENDER
         .get()
@@ -259,6 +270,9 @@ struct SpecialRender {
     bullet: char,
     body_prefix: char,
     horiz_rule: char,
+
+    checkmark: &'static str,
+    cross: &'static str,
 
     // Uncomment these as needed
     // red: &'static str,
@@ -312,6 +326,9 @@ impl SpecialRender {
             body_prefix: '▌',
             horiz_rule: '─',
 
+            checkmark: "\u{2713}",
+            cross: "\u{2717}",
+
             // red: "\x1b[31m",
             bright_red: "\x1b[91m",
             // green: "\x1b[32m",
@@ -353,6 +370,9 @@ impl SpecialRender {
             bullet: '-',
             body_prefix: '>',
             horiz_rule: '-',
+
+            checkmark: "ok:",
+            cross: "error:",
 
             // red: "",
             bright_red: "",
@@ -1019,12 +1039,11 @@ pub async fn edit_labels(
 
     if !unknown_labels.is_empty() {
         if unknown_labels.len() == 1 {
-            println!("'{}' doesn't exist", &unknown_labels[0]);
+            crate::output::error(&format!("'{}' doesn't exist", &unknown_labels[0]));
         } else {
-            let SpecialRender { bullet, .. } = *crate::special_render();
-            println!("The following labels don't exist:");
+            crate::output::error("The following labels don't exist:");
             for unknown_label in unknown_labels {
-                println!("{bullet} {unknown_label}");
+                crate::output::error(&format!("  {unknown_label}"));
             }
         }
     }

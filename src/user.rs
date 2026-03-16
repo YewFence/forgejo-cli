@@ -336,7 +336,7 @@ impl UserCommand {
 async fn user_search(api: &Forgejo, query: &str, page: Option<usize>) -> eyre::Result<()> {
     let page = page.unwrap_or(1);
     if page == 0 {
-        println!("There is no page 0");
+        crate::output::info("There is no page 0");
     }
     let query = forgejo_api::structs::UserSearchQuery {
         q: Some(query.to_owned()),
@@ -346,43 +346,37 @@ async fn user_search(api: &Forgejo, query: &str, page: Option<usize>) -> eyre::R
     let users = result.data.ok_or_eyre("search did not return data")?;
     let ok = result.ok.ok_or_eyre("search did not return ok")?;
     if !ok {
-        println!("Search failed");
+        crate::output::error("Search failed");
         return Ok(());
     }
     if users.is_empty() {
-        println!("No users matched that query");
+        crate::output::info("No users matched that query");
     } else {
-        let SpecialRender {
-            bullet,
-            dash,
-            bold,
-            reset,
-            ..
-        } = *crate::special_render();
         let page_start = (page - 1) * 20;
         let pages_total = users.len().div_ceil(20);
         if page_start >= users.len() {
             if pages_total == 1 {
-                println!("There is only 1 page");
+                crate::output::info("There is only 1 page");
             } else {
-                println!("There are only {pages_total} pages");
+                crate::output::info(&format!("There are only {pages_total} pages"));
             }
         } else {
-            for user in users.iter().skip(page_start).take(20) {
-                let username = user
-                    .login
-                    .as_deref()
-                    .ok_or_eyre("user does not have name")?;
-                println!("{bullet} {bold}{username}{reset}");
-            }
-            println!(
-                "Showing {bold}{}{dash}{}{reset} of {bold}{}{reset} results ({page}/{pages_total})",
+            let page_users: Vec<_> = users.iter().skip(page_start).take(20).collect();
+            crate::output::print_list(
+                &page_users,
+                &["USERNAME"],
+                |user| {
+                    vec![user.login.as_deref().unwrap_or("?").to_string()]
+                },
+            );
+            crate::output::info(&format!(
+                "Showing {}-{} of {} results ({page}/{pages_total})",
                 page_start + 1,
                 (page_start + 20).min(users.len()),
                 users.len()
-            );
+            ));
             if users.len() > 20 {
-                println!("View more with the --page flag");
+                crate::output::info("View more with the --page flag");
             }
         }
     }
@@ -390,67 +384,70 @@ async fn user_search(api: &Forgejo, query: &str, page: Option<usize>) -> eyre::R
 }
 
 async fn view_user(api: &Forgejo, user: Option<&str>) -> eyre::Result<()> {
-    let SpecialRender {
-        bold,
-        dash,
-        bright_cyan,
-        light_grey,
-        reset,
-        ..
-    } = *crate::special_render();
-
     let user_data = match user {
         Some(user) => api.user_get(user).await?,
         None => api.user_get_current().await?,
     };
-    let username = user_data
-        .login
-        .as_deref()
-        .ok_or_eyre("user has no username")?;
-    print!("{bright_cyan}{bold}{username}{reset}");
-    if let Some(pronouns) = user_data.pronouns.as_deref() {
-        if !pronouns.is_empty() {
-            print!("{light_grey} {dash} {bold}{pronouns}{reset}");
-        }
-    }
-    println!();
-    let followers = user_data.followers_count.unwrap_or_default();
-    let following = user_data.following_count.unwrap_or_default();
-    println!("{bold}{followers}{reset} followers {dash} {bold}{following}{reset} following");
-    let mut first = true;
-    if let Some(website) = user_data.website.as_deref() {
-        if !website.is_empty() {
-            print!("{bold}{website}{reset}");
-            first = false;
-        }
-    }
-    if let Some(email) = user_data.email.as_deref() {
-        if !email.is_empty() && !email.contains("noreply") {
-            if !first {
-                print!(" {dash} ");
+
+    crate::output::print_or_json(&user_data, || {
+        let SpecialRender {
+            bold,
+            dash,
+            bright_cyan,
+            light_grey,
+            reset,
+            ..
+        } = *crate::special_render();
+
+        let username = user_data
+            .login
+            .as_deref()
+            .ok_or_eyre("user has no username")?;
+        print!("{bright_cyan}{bold}{username}{reset}");
+        if let Some(pronouns) = user_data.pronouns.as_deref() {
+            if !pronouns.is_empty() {
+                print!("{light_grey} {dash} {bold}{pronouns}{reset}");
             }
-            print!("{bold}{email}{reset}");
         }
-    }
-    if !first {
         println!();
-    }
-
-    if let Some(desc) = user_data.description.as_deref() {
-        if !desc.is_empty() {
-            println!();
-            println!("{}", crate::markdown(desc));
+        let followers = user_data.followers_count.unwrap_or_default();
+        let following = user_data.following_count.unwrap_or_default();
+        println!("{bold}{followers}{reset} followers {dash} {bold}{following}{reset} following");
+        let mut first = true;
+        if let Some(website) = user_data.website.as_deref() {
+            if !website.is_empty() {
+                print!("{bold}{website}{reset}");
+                first = false;
+            }
+        }
+        if let Some(email) = user_data.email.as_deref() {
+            if !email.is_empty() && !email.contains("noreply") {
+                if !first {
+                    print!(" {dash} ");
+                }
+                print!("{bold}{email}{reset}");
+            }
+        }
+        if !first {
             println!();
         }
-    }
 
-    let joined = user_data
-        .created
-        .ok_or_eyre("user does not have join date")?;
-    let date_format = time::macros::format_description!("[month repr:short] [day], [year]");
-    println!("Joined on {bold}{}{reset}", joined.format(&date_format)?);
+        if let Some(desc) = user_data.description.as_deref() {
+            if !desc.is_empty() {
+                println!();
+                println!("{}", crate::markdown(desc));
+                println!();
+            }
+        }
 
-    Ok(())
+        let joined = user_data
+            .created
+            .ok_or_eyre("user does not have join date")?;
+        let date_format = time::macros::format_description!("[month repr:short] [day], [year]");
+        println!("Joined on {bold}{}{reset}", joined.format(&date_format)?);
+
+        Ok(())
+    })
 }
 
 async fn browse_user(api: &Forgejo, host_url: &url::Url, user: Option<&str>) -> eyre::Result<()> {
@@ -476,13 +473,13 @@ async fn browse_user(api: &Forgejo, host_url: &url::Url, user: Option<&str>) -> 
 
 async fn follow_user(api: &Forgejo, user: &str) -> eyre::Result<()> {
     api.user_current_put_follow(user).await?;
-    println!("Followed {user}");
+    crate::output::success(&format!("Followed {user}"));
     Ok(())
 }
 
 async fn unfollow_user(api: &Forgejo, user: &str) -> eyre::Result<()> {
     api.user_current_delete_follow(user).await?;
-    println!("Unfollowed {user}");
+    crate::output::success(&format!("Unfollowed {user}"));
     Ok(())
 }
 
@@ -494,23 +491,17 @@ async fn list_following(api: &Forgejo, user: Option<&str>) -> eyre::Result<()> {
 
     if following.is_empty() {
         match user {
-            Some(name) => println!("{name} isn't following anyone"),
-            None => println!("You aren't following anyone"),
+            Some(name) => crate::output::info(&format!("{name} isn't following anyone")),
+            None => crate::output::info("You aren't following anyone"),
         }
     } else {
-        match user {
-            Some(name) => println!("{name} is following:"),
-            None => println!("You are following:"),
-        }
-        let SpecialRender { bullet, .. } = *crate::special_render();
-
-        for followed in following {
-            let username = followed
-                .login
-                .as_deref()
-                .ok_or_eyre("user does not have username")?;
-            println!("{bullet} {username}");
-        }
+        crate::output::print_list(
+            &following,
+            &["USERNAME"],
+            |user| {
+                vec![user.login.as_deref().unwrap_or("?").to_string()]
+            },
+        );
     }
 
     Ok(())
@@ -524,23 +515,17 @@ async fn list_followers(api: &Forgejo, user: Option<&str>) -> eyre::Result<()> {
 
     if followers.is_empty() {
         match user {
-            Some(name) => println!("{name} has no followers"),
-            None => println!("You have no followers :("),
+            Some(name) => crate::output::info(&format!("{name} has no followers")),
+            None => crate::output::info("You have no followers"),
         }
     } else {
-        match user {
-            Some(name) => println!("{name} is followed by:"),
-            None => println!("You are followed by:"),
-        }
-        let SpecialRender { bullet, .. } = *crate::special_render();
-
-        for follower in followers {
-            let username = follower
-                .login
-                .as_deref()
-                .ok_or_eyre("user does not have username")?;
-            println!("{bullet} {username}");
-        }
+        crate::output::print_list(
+            &followers,
+            &["USERNAME"],
+            |user| {
+                vec![user.login.as_deref().unwrap_or("?").to_string()]
+            },
+        );
     }
 
     Ok(())
@@ -548,13 +533,13 @@ async fn list_followers(api: &Forgejo, user: Option<&str>) -> eyre::Result<()> {
 
 async fn block_user(api: &Forgejo, user: &str) -> eyre::Result<()> {
     api.user_block_user(user).await?;
-    println!("Blocked {user}");
+    crate::output::success(&format!("Blocked {user}"));
     Ok(())
 }
 
 async fn unblock_user(api: &Forgejo, user: &str) -> eyre::Result<()> {
     api.user_unblock_user(user).await?;
-    println!("Unblocked {user}");
+    crate::output::success(&format!("Unblocked {user}"));
     Ok(())
 }
 
@@ -603,13 +588,13 @@ async fn list_repos(
     if repos.is_empty() {
         if starred {
             match user {
-                Some(user) => println!("{user} has not starred any repos"),
-                None => println!("You have not starred any repos"),
+                Some(user) => crate::output::info(&format!("{user} has not starred any repos")),
+                None => crate::output::info("You have not starred any repos"),
             }
         } else {
             match user {
-                Some(user) => println!("{user} does not own any repos"),
-                None => println!("You do not own any repos"),
+                Some(user) => crate::output::info(&format!("{user} does not own any repos")),
+                None => crate::output::info("You do not own any repos"),
             }
         };
     } else {
@@ -625,20 +610,13 @@ async fn list_repos(
         };
         repos.sort_unstable_by(sort_fn);
 
-        let SpecialRender {
-            bullet,
-            bold,
-            dash,
-            reset,
-            ..
-        } = *crate::special_render();
-        for repo in &repos {
-            let name = repo
-                .full_name
-                .as_deref()
-                .ok_or_eyre("repo does not have name")?;
-            println!("{bullet} {name}");
-        }
+        crate::output::print_list(
+            &repos,
+            &["NAME"],
+            |repo| {
+                vec![repo.full_name.as_deref().unwrap_or("?").to_string()]
+            },
+        );
 
         let page_start = (page - 1) * 50;
         let total_items = match headers.x_total_count {
@@ -647,15 +625,13 @@ async fn list_repos(
         };
         let pages_total = total_items.div_ceil(50);
 
-        if repos.len() == 1 {
-            println!("1 repo");
-        } else {
-            println!(
-                "Showing {bold}{}{dash}{}{reset} of {bold}{}{reset} results ({page}/{pages_total})",
+        if !repos.is_empty() {
+            crate::output::info(&format!(
+                "Showing {}-{} of {} results ({page}/{pages_total})",
                 page_start + 1,
                 page_start + repos.len() as u32,
                 total_items,
-            );
+            ));
         }
     }
 
@@ -670,30 +646,22 @@ async fn list_orgs(api: &Forgejo, user: Option<&str>) -> eyre::Result<()> {
 
     if orgs.is_empty() {
         match user {
-            Some(user) => println!("{user} is not a member of any organizations"),
-            None => println!("You are not a member of any organizations"),
+            Some(user) => crate::output::info(&format!("{user} is not a member of any organizations")),
+            None => crate::output::info("You are not a member of any organizations"),
         }
     } else {
         orgs.sort_unstable_by(|a, b| a.name.cmp(&b.name));
 
-        let SpecialRender { bullet, dash, .. } = *crate::special_render();
-        for org in &orgs {
-            let name = org.name.as_deref().ok_or_eyre("org does not have name")?;
-            let full_name = org
-                .full_name
-                .as_deref()
-                .ok_or_eyre("org does not have name")?;
-            if !full_name.is_empty() {
-                println!("{bullet} {name} {dash} \"{full_name}\"");
-            } else {
-                println!("{bullet} {name}");
-            }
-        }
-        if orgs.len() == 1 {
-            println!("1 organization");
-        } else {
-            println!("{} organizations", orgs.len());
-        }
+        crate::output::print_list(
+            &orgs,
+            &["NAME", "FULL NAME"],
+            |org| {
+                vec![
+                    org.name.as_deref().unwrap_or("?").to_string(),
+                    org.full_name.as_deref().unwrap_or("").to_string(),
+                ]
+            },
+        );
     }
     Ok(())
 }
@@ -712,10 +680,12 @@ async fn list_activity(api: &Forgejo, user: Option<&str>) -> eyre::Result<()> {
     };
     let (_, feed) = api.user_list_activity_feeds(&user, query).await?;
 
-    for activity in feed {
-        print_activity(&activity)?;
-    }
-    Ok(())
+    crate::output::print_or_json(&feed, || {
+        for activity in &feed {
+            print_activity(activity)?;
+        }
+        Ok(())
+    })
 }
 
 pub fn print_activity(activity: &forgejo_api::structs::Activity) -> eyre::Result<()> {
@@ -980,6 +950,7 @@ async fn edit_bio(api: &Forgejo, new_bio: Option<String>) -> eyre::Result<()> {
         ..default_settings_opt()
     };
     api.update_user_settings(opt).await?;
+    crate::output::success("Updated bio");
     Ok(())
 }
 
@@ -992,6 +963,7 @@ async fn edit_name(api: &Forgejo, new_name: Option<String>, unset: bool) -> eyre
                 ..default_settings_opt()
             };
             api.update_user_settings(opt).await?;
+            crate::output::success("Updated name");
         }
         (None, true) => {
             let opt = forgejo_api::structs::UserSettingsOptions {
@@ -999,8 +971,9 @@ async fn edit_name(api: &Forgejo, new_name: Option<String>, unset: bool) -> eyre
                 ..default_settings_opt()
             };
             api.update_user_settings(opt).await?;
+            crate::output::success("Removed name");
         }
-        _ => println!("Use --unset to remove your name from your profile"),
+        _ => crate::output::info("Use --unset to remove your name from your profile"),
     }
     Ok(())
 }
@@ -1018,6 +991,7 @@ async fn edit_pronouns(
                 ..default_settings_opt()
             };
             api.update_user_settings(opt).await?;
+            crate::output::success("Updated pronouns");
         }
         (None, true) => {
             let opt = forgejo_api::structs::UserSettingsOptions {
@@ -1025,8 +999,9 @@ async fn edit_pronouns(
                 ..default_settings_opt()
             };
             api.update_user_settings(opt).await?;
+            crate::output::success("Removed pronouns");
         }
-        _ => println!("Use --unset to remove your pronouns from your profile"),
+        _ => crate::output::info("Use --unset to remove your pronouns from your profile"),
     }
     Ok(())
 }
@@ -1044,6 +1019,7 @@ async fn edit_location(
                 ..default_settings_opt()
             };
             api.update_user_settings(opt).await?;
+            crate::output::success("Updated location");
         }
         (None, true) => {
             let opt = forgejo_api::structs::UserSettingsOptions {
@@ -1051,18 +1027,25 @@ async fn edit_location(
                 ..default_settings_opt()
             };
             api.update_user_settings(opt).await?;
+            crate::output::success("Removed location");
         }
-        _ => println!("Use --unset to remove your location from your profile"),
+        _ => crate::output::info("Use --unset to remove your location from your profile"),
     }
     Ok(())
 }
 
 async fn edit_activity(api: &Forgejo, visibility: VisbilitySetting) -> eyre::Result<()> {
+    let hidden = visibility == VisbilitySetting::Hidden;
     let opt = forgejo_api::structs::UserSettingsOptions {
-        hide_activity: Some(visibility == VisbilitySetting::Hidden),
+        hide_activity: Some(hidden),
         ..default_settings_opt()
     };
     api.update_user_settings(opt).await?;
+    if hidden {
+        crate::output::success("Activity is now hidden");
+    } else {
+        crate::output::success("Activity is now public");
+    }
     Ok(())
 }
 
@@ -1078,14 +1061,19 @@ async fn edit_email(
             ..default_settings_opt()
         };
         api.update_user_settings(opt).await?;
+        crate::output::success("Updated email visibility");
     }
     if !add.is_empty() {
+        let count = add.len();
         let opt = forgejo_api::structs::CreateEmailOption { emails: Some(add) };
         api.user_add_email(opt).await?;
+        crate::output::success(&format!("Added {count} email address(es)"));
     }
     if !rm.is_empty() {
+        let count = rm.len();
         let opt = forgejo_api::structs::DeleteEmailOption { emails: Some(rm) };
         api.user_delete_email(opt).await?;
+        crate::output::success(&format!("Removed {count} email address(es)"));
     }
     Ok(())
 }
@@ -1099,6 +1087,7 @@ async fn edit_website(api: &Forgejo, new_url: Option<String>, unset: bool) -> ey
                 ..default_settings_opt()
             };
             api.update_user_settings(opt).await?;
+            crate::output::success("Updated website");
         }
         (None, true) => {
             let opt = forgejo_api::structs::UserSettingsOptions {
@@ -1106,8 +1095,9 @@ async fn edit_website(api: &Forgejo, new_url: Option<String>, unset: bool) -> ey
                 ..default_settings_opt()
             };
             api.update_user_settings(opt).await?;
+            crate::output::success("Removed website");
         }
-        _ => println!("Use --unset to remove your name from your profile"),
+        _ => crate::output::info("Use --unset to remove your website from your profile"),
     }
     Ok(())
 }
@@ -1123,7 +1113,7 @@ async fn list_keys(api: &Forgejo, verbose: bool) -> eyre::Result<()> {
 
     let keys = api.user_current_list_keys(Default::default()).all().await?;
 
-    println!("total keys: {}", keys.len());
+    crate::output::info(&format!("Total keys: {}", keys.len()));
 
     let id_length = keys
         .iter()
@@ -1159,9 +1149,11 @@ async fn list_keys(api: &Forgejo, verbose: bool) -> eyre::Result<()> {
 
 async fn view_key(api: &Forgejo, id: i64) -> eyre::Result<()> {
     let key = api.user_current_get_key(id).await?;
-    print_key(&key, 0);
 
-    Ok(())
+    crate::output::print_or_json(&key, || {
+        print_key(&key, 0);
+        Ok(())
+    })
 }
 
 fn print_key(key: &forgejo_api::structs::PublicKey, indent: usize) {
@@ -1200,7 +1192,7 @@ fn print_key(key: &forgejo_api::structs::PublicKey, indent: usize) {
 
 async fn delete_key(api: &Forgejo, id: i64) -> eyre::Result<()> {
     api.user_current_delete_key(id).await?;
-    println!("successfully deleted key with ID {id}");
+    crate::output::success(&format!("Deleted key with ID {id}"));
 
     Ok(())
 }
@@ -1312,7 +1304,8 @@ async fn upload_key(
     };
 
     let key = api.user_current_post_key(body).await?;
-    println!("Key created successfully!\n");
+    crate::output::success("Uploaded SSH key");
+    println!();
     print_key(&key, 0);
 
     Ok(())
@@ -1342,7 +1335,7 @@ async fn list_gpg(api: &Forgejo, verbose: bool) -> eyre::Result<()> {
         .max()
         .unwrap_or(0);
 
-    println!("total keys: {}", keys.len());
+    crate::output::info(&format!("Total keys: {}", keys.len()));
     for key in keys {
         let id = key.id.unwrap_or(0);
         if verbose {
@@ -1359,9 +1352,11 @@ async fn list_gpg(api: &Forgejo, verbose: bool) -> eyre::Result<()> {
 
 async fn view_gpg(api: &Forgejo, id: i64) -> eyre::Result<()> {
     let key = api.user_current_get_gpg_key(id).await?;
-    print_gpg(&key, 0);
 
-    Ok(())
+    crate::output::print_or_json(&key, || {
+        print_gpg(&key, 0);
+        Ok(())
+    })
 }
 
 fn print_gpg(key: &forgejo_api::structs::GPGKey, indent_depth: usize) {
@@ -1438,13 +1433,13 @@ async fn delete_gpg(api: &Forgejo, id: i64, force: bool) -> eyre::Result<()> {
     );
 
     api.user_current_delete_gpg_key(id).await?;
-    println!("Key with ID {id} deleted successfully.");
+    crate::output::success(&format!("Deleted GPG key with ID {id}"));
 
     Ok(())
 }
 
 async fn upload_gpg(api: &Forgejo, key_name: String, no_verify: bool) -> eyre::Result<()> {
-    println!("Exporting key...");
+    crate::output::info("Exporting key...");
     let key_output = tokio::process::Command::new("gpg")
         .arg("--export")
         .arg("--armor")
@@ -1475,7 +1470,8 @@ async fn upload_gpg(api: &Forgejo, key_name: String, no_verify: bool) -> eyre::R
     };
     let key = api.user_current_post_gpg_key(form).await?;
 
-    println!("Key successfully added!\n");
+    crate::output::success("Uploaded GPG key");
+    println!();
     print_gpg(&key, 0);
 
     Ok(())
@@ -1484,10 +1480,10 @@ async fn upload_gpg(api: &Forgejo, key_name: String, no_verify: bool) -> eyre::R
 async fn gpg_verify_token(api: &Forgejo, key_name: &str) -> eyre::Result<String> {
     use tokio::io::AsyncWriteExt;
 
-    println!("Fetching verification token...");
+    crate::output::info("Fetching verification token...");
     let token = api.get_verification_token().await?;
 
-    println!("Signing verification token with key '{key_name}'...");
+    crate::output::info(&format!("Signing verification token with key '{key_name}'..."));
     let mut child = tokio::process::Command::new("gpg")
         .arg("--armor")
         .arg("--default-key")
@@ -1519,7 +1515,7 @@ async fn verify_gpg(api: &Forgejo, id: i64) -> eyre::Result<()> {
         eyre::bail!("API didn't return a key ID!");
     };
 
-    println!("Verifying this key:");
+    crate::output::info("Verifying this key:");
     print_gpg(&key, 0);
 
     let token = gpg_verify_token(api, key_id).await?;
@@ -1530,7 +1526,7 @@ async fn verify_gpg(api: &Forgejo, id: i64) -> eyre::Result<()> {
     };
     api.user_verify_gpg_key(option).await?;
 
-    println!("Verification successful!");
+    crate::output::success("GPG key verified");
 
     Ok(())
 }

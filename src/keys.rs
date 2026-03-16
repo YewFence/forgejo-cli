@@ -26,7 +26,7 @@ impl KeyInfo {
         let this = match json {
             Ok(x) => serde_json::from_slice::<Self>(&x)?,
             Err(e) if e.kind() == ErrorKind::NotFound => {
-                eprintln!("keys file not found, creating");
+                crate::output::info("keys file not found, creating");
                 Self::default()
             }
             Err(e) => return Err(e.into()),

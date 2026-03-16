@@ -193,20 +193,15 @@ async fn list_orgs(api: &Forgejo, page: u32, only_member_of: bool) -> eyre::Resu
         (Some(headers.x_total_count.unwrap_or_default() as u64), orgs)
     };
 
-    if orgs.is_empty() {
-        println!("No results");
-    } else {
-        let SpecialRender {
-            bullet,
-            bold,
-            reset,
-            ..
-        } = *crate::special_render();
-        for org in orgs {
-            let name = org.name.ok_or_eyre("org does not have name")?;
-            println!("{bullet} {bold}{name}{reset}");
-        }
-        if let Some(total) = total {
+    crate::output::print_list(
+        &orgs,
+        &["NAME"],
+        |org| {
+            vec![org.name.as_deref().unwrap_or("?").to_string()]
+        },
+    );
+    if let Some(total) = total {
+        if !orgs.is_empty() && !crate::json_mode() {
             println!("Page {} of {}", page, total.div_ceil(20));
         }
     }
@@ -216,34 +211,7 @@ async fn list_orgs(api: &Forgejo, page: u32, only_member_of: bool) -> eyre::Resu
 async fn view_org(api: &Forgejo, name: String) -> eyre::Result<()> {
     let org = api.org_get(&name).await?;
 
-    let SpecialRender {
-        bold,
-        dash,
-        bright_cyan,
-        light_grey,
-        reset,
-        ..
-    } = *crate::special_render();
-
-    let name = org.name.as_deref().ok_or_eyre("org does not have name")?;
-    let visibility = org
-        .visibility
-        .as_deref()
-        .ok_or_eyre("new org does not have visibility")?;
-    let vis_pretty = match visibility {
-        "public" => "Public",
-        "limited" => "Limited",
-        "private" => "Private",
-        _ => visibility,
-    };
-
-    if let Some(full_name) = &org.full_name {
-        print!("{bold}{bright_cyan}{full_name}{reset} {light_grey}({name}){reset}");
-    } else {
-        print!("{bold}{bright_cyan}{name}{reset}");
-    }
-    print!(" {dash} {vis_pretty}");
-    println!();
+    // Pre-fetch counts so the synchronous closure doesn't need async
     let member_count = match api.org_list_members(&name).page(1).page_size(1).await {
         Ok((members_headers, _)) => members_headers.x_total_count.unwrap_or_default(),
         Err(_) => {
@@ -255,47 +223,86 @@ async fn view_org(api: &Forgejo, name: String) -> eyre::Result<()> {
             members_headers.x_total_count.unwrap_or_default()
         }
     };
-    print!("{bold}{member_count}{reset} members");
-    if let Ok((teams_headers, _)) = api.org_list_teams(&name).page(1).page_size(1).await {
-        let teams = teams_headers.x_total_count.unwrap_or_default();
-        println!(" {dash} {bold}{teams}{reset} teams");
-    }
-    println!();
+    let team_count = api
+        .org_list_teams(&name)
+        .page(1)
+        .page_size(1)
+        .await
+        .ok()
+        .map(|(h, _)| h.x_total_count.unwrap_or_default());
 
-    let mut first = true;
-    if let Some(website) = &org.website {
-        if !website.is_empty() {
-            print!("{bold}{website}{reset}");
-            first = false;
+    crate::output::print_or_json(&org, || {
+        let SpecialRender {
+            bold,
+            dash,
+            bright_cyan,
+            light_grey,
+            reset,
+            ..
+        } = *crate::special_render();
+
+        let name = org.name.as_deref().ok_or_eyre("org does not have name")?;
+        let visibility = org
+            .visibility
+            .as_deref()
+            .ok_or_eyre("new org does not have visibility")?;
+        let vis_pretty = match visibility {
+            "public" => "Public",
+            "limited" => "Limited",
+            "private" => "Private",
+            _ => visibility,
+        };
+
+        if let Some(full_name) = &org.full_name {
+            print!("{bold}{bright_cyan}{full_name}{reset} {light_grey}({name}){reset}");
+        } else {
+            print!("{bold}{bright_cyan}{name}{reset}");
         }
-    }
-    if let Some(email) = &org.email {
-        if !email.is_empty() {
-            if !first {
-                print!(" {dash} ");
-            }
-            print!("{email}");
-            first = false;
-        }
-    }
-    if let Some(location) = &org.location {
-        if !location.is_empty() {
-            if !first {
-                print!(" {dash} ");
-            }
-            print!("{location}");
-            first = false;
-        }
-    }
-    if !first {
+        print!(" {dash} {vis_pretty}");
         println!();
-    }
-
-    if let Some(description) = &org.description {
-        if !description.is_empty() {
-            println!("\n{}\n", crate::markdown(&description));
+        print!("{bold}{member_count}{reset} members");
+        if let Some(teams) = team_count {
+            println!(" {dash} {bold}{teams}{reset} teams");
         }
-    }
+        println!();
+
+        let mut first = true;
+        if let Some(website) = &org.website {
+            if !website.is_empty() {
+                print!("{bold}{website}{reset}");
+                first = false;
+            }
+        }
+        if let Some(email) = &org.email {
+            if !email.is_empty() {
+                if !first {
+                    print!(" {dash} ");
+                }
+                print!("{email}");
+                first = false;
+            }
+        }
+        if let Some(location) = &org.location {
+            if !location.is_empty() {
+                if !first {
+                    print!(" {dash} ");
+                }
+                print!("{location}");
+                first = false;
+            }
+        }
+        if !first {
+            println!();
+        }
+
+        if let Some(description) = &org.description {
+            if !description.is_empty() {
+                println!("\n{}\n", crate::markdown(description));
+            }
+        }
+
+        Ok(())
+    })?;
 
     Ok(())
 }
@@ -342,27 +349,11 @@ async fn create_org(api: &Forgejo, name: String, options: OrgOptions) -> eyre::R
         .visibility
         .ok_or_eyre("new org does not have visibility")?;
 
-    let SpecialRender {
-        fancy,
-        bold,
-        light_grey,
-        reset,
-        ..
-    } = *crate::special_render();
-    print!("created new {visibility} org ");
-    if let Some(full_name) = &new_org.full_name {
-        if fancy {
-            println!("{bold}{full_name}{reset} {light_grey}({name}){reset}");
-        } else {
-            println!("\"{full_name}\" ({name})");
-        }
-    } else {
-        if fancy {
-            println!("{bold}{name}{reset}");
-        } else {
-            println!("\"{name}\"");
-        }
-    }
+    let display = match &new_org.full_name {
+        Some(full_name) if !full_name.is_empty() => format!("{full_name} ({name})"),
+        _ => name.to_string(),
+    };
+    crate::output::success(&format!("Created {visibility} org {display}"));
     Ok(())
 }
 
@@ -377,6 +368,7 @@ async fn edit_org(api: &Forgejo, name: String, options: OrgOptions) -> eyre::Res
         website: options.website,
     };
     api.org_edit(&name, opt).await?;
+    crate::output::success(&format!("Updated org {name}"));
     Ok(())
 }
 
@@ -404,28 +396,14 @@ async fn list_org_members(api: &Forgejo, org: String, page: u32) -> eyre::Result
         (headers.x_total_count.unwrap_or_default() as u64, users)
     };
 
-    let SpecialRender {
-        bullet,
-        light_grey,
-        bright_cyan,
-        reset,
-        ..
-    } = crate::special_render();
-    if users.is_empty() {
-        println!("No results");
-    } else {
-        for user in users {
-            let username = user
-                .login
-                .as_deref()
-                .ok_or_eyre("repo does not have full name")?;
-            match user.full_name.as_deref().filter(|s| !s.is_empty()) {
-                Some(full_name) => println!(
-                    "{bullet} {bright_cyan}{full_name}{reset} {light_grey}({username}){reset}"
-                ),
-                None => println!("{bullet} {bright_cyan}{username}{reset}"),
-            }
-        }
+    crate::output::print_list(
+        &users,
+        &["USERNAME"],
+        |user| {
+            vec![user.login.as_deref().unwrap_or("?").to_string()]
+        },
+    );
+    if !users.is_empty() && !crate::json_mode() {
         println!("Page {} of {}", page, count.div_ceil(20));
     }
     Ok(())
@@ -441,29 +419,26 @@ async fn member_visibility(
         .await?
         .login
         .ok_or_eyre("current user does not have username")?;
-    let SpecialRender {
-        bright_blue, reset, ..
-    } = crate::special_render();
     if api.org_is_member(&org, &username).await.is_ok() {
         match visibility {
             Some(OrgMemberVisibility::Private) => {
                 api.org_conceal_member(&org, &username).await?;
-                println!("You are now a private member of {bright_blue}{org}{reset}");
+                crate::output::success(&format!("You are now a private member of {org}"));
             }
             Some(OrgMemberVisibility::Public) => {
-                api.org_conceal_member(&org, &username).await?;
-                println!("You are now a public member of {bright_blue}{org}{reset}");
+                api.org_publicize_member(&org, &username).await?;
+                crate::output::success(&format!("You are now a public member of {org}"));
             }
             None => {
                 if api.org_is_public_member(&org, &username).await.is_ok() {
-                    println!("You are a public member of {bright_blue}{org}{reset}");
+                    crate::output::info(&format!("You are a public member of {org}"));
                 } else {
-                    println!("You are a private member of {bright_blue}{org}{reset}");
+                    crate::output::info(&format!("You are a private member of {org}"));
                 }
             }
         }
     } else {
-        println!("You are not a member of {bright_blue}{org}{reset}");
+        crate::output::info(&format!("You are not a member of {org}"));
     }
     Ok(())
 }
@@ -609,7 +584,7 @@ async fn add_org_label(
         name,
     };
     let label = api.org_create_label(&org, opt).await?;
-    println!("Created new label {}", crate::render_label(&label)?);
+    crate::output::success(&format!("Created label {}", crate::render_label(&label)?));
     Ok(())
 }
 
@@ -641,11 +616,11 @@ async fn edit_org_label(
         name: new_name,
     };
     let label = api.org_edit_label(&org, id, opt).await?;
-    println!(
+    crate::output::success(&format!(
         "Changed label {} to {}",
         crate::render_label(&old_label)?,
         crate::render_label(&label)?
-    );
+    ));
     Ok(())
 }
 
@@ -655,7 +630,7 @@ async fn remove_org_label(api: &Forgejo, org: String, name: String) -> eyre::Res
         .ok_or_eyre("label not found")?;
     let id = label.id.ok_or_eyre("label does not have id")?;
     api.org_delete_label(&org, id).await?;
-    println!("Removed label {}", crate::render_label(&label)?);
+    crate::output::success(&format!("Removed label {}", crate::render_label(&label)?));
     Ok(())
 }
 
@@ -722,17 +697,15 @@ impl RepoSubcommand {
 
 async fn list_org_repos(api: &Forgejo, org: String, page: u32) -> eyre::Result<()> {
     let (headers, repos) = api.org_list_repos(&org).page(page).await?;
-    let SpecialRender { bullet, .. } = crate::special_render();
-    if repos.is_empty() {
-        println!("No results");
-    } else {
-        for repo in repos {
-            let full_name = repo
-                .full_name
-                .as_deref()
-                .ok_or_eyre("repo does not have full name")?;
-            println!("{bullet} {full_name}");
-        }
+
+    crate::output::print_list(
+        &repos,
+        &["NAME"],
+        |repo| {
+            vec![repo.full_name.as_deref().unwrap_or("?").to_string()]
+        },
+    );
+    if !repos.is_empty() && !crate::json_mode() {
         let count = headers.x_total_count.unwrap_or_default() as u64;
         println!("Page {} of {}", page, count.div_ceil(20));
     }

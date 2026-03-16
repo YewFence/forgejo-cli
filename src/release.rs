@@ -275,7 +275,7 @@ async fn create_release(
         .await?;
     }
 
-    println!("Created release {name}");
+    crate::output::success(&format!("Created release {name}"));
 
     Ok(())
 }
@@ -317,6 +317,7 @@ async fn edit_release(
         .ok_or_else(|| eyre::eyre!("release does not have id"))?;
     api.repo_edit_release(repo.owner(), repo.name(), id, release_edit)
         .await?;
+    crate::output::success(&format!("Updated release {name}"));
     Ok(())
 }
 
@@ -334,28 +335,23 @@ async fn list_releases(
     let (_, releases) = api
         .repo_list_releases(repo.owner(), repo.name(), query)
         .await?;
-    for release in releases {
-        let name = release
-            .name
-            .as_ref()
-            .ok_or_else(|| eyre::eyre!("release does not have name"))?;
-        let draft = release
-            .draft
-            .as_ref()
-            .ok_or_else(|| eyre::eyre!("release does not have draft"))?;
-        let prerelease = release
-            .prerelease
-            .as_ref()
-            .ok_or_else(|| eyre::eyre!("release does not have prerelease"))?;
-        print!("{}", name);
-        match (draft, prerelease) {
-            (false, false) => (),
-            (true, false) => print!(" (draft)"),
-            (false, true) => print!(" (prerelease)"),
-            (true, true) => print!(" (draft, prerelease)"),
-        }
-        println!();
-    }
+    crate::output::print_list(
+        &releases,
+        &["NAME", "TAG", "TYPE"],
+        |release| {
+            let name = release.name.as_deref().unwrap_or("?").to_string();
+            let tag = release.tag_name.as_deref().unwrap_or("").to_string();
+            let draft = release.draft.unwrap_or(false);
+            let prerelease = release.prerelease.unwrap_or(false);
+            let type_str = match (draft, prerelease) {
+                (true, true) => "draft, prerelease".to_string(),
+                (true, false) => "draft".to_string(),
+                (false, true) => "prerelease".to_string(),
+                (false, false) => "release".to_string(),
+            };
+            vec![name, tag, type_str]
+        },
+    );
     Ok(())
 }
 
@@ -371,54 +367,57 @@ async fn view_release(
     } else {
         find_release(repo, api, &name).await?
     };
-    let name = release
-        .name
-        .as_ref()
-        .ok_or_else(|| eyre::eyre!("release does not have name"))?;
-    let author = release
-        .author
-        .as_ref()
-        .ok_or_else(|| eyre::eyre!("release does not have author"))?;
-    let login = author
-        .login
-        .as_ref()
-        .ok_or_else(|| eyre::eyre!("autho does not have login"))?;
-    let created_at = release
-        .created_at
-        .ok_or_else(|| eyre::eyre!("release does not have created_at"))?;
-    println!("{}", name);
-    print!("By {} on ", login);
-    created_at.format_into(
-        &mut std::io::stdout(),
-        &time::format_description::well_known::Rfc2822,
-    )?;
-    println!();
-    let SpecialRender { bullet, .. } = crate::special_render();
-    let body = release
-        .body
-        .as_ref()
-        .ok_or_else(|| eyre::eyre!("release does not have body"))?;
-    if !body.is_empty() {
+    crate::output::print_or_json(&release, || {
+        let name = release
+            .name
+            .as_ref()
+            .ok_or_else(|| eyre::eyre!("release does not have name"))?;
+        let author = release
+            .author
+            .as_ref()
+            .ok_or_else(|| eyre::eyre!("release does not have author"))?;
+        let login = author
+            .login
+            .as_ref()
+            .ok_or_else(|| eyre::eyre!("author does not have login"))?;
+        let created_at = release
+            .created_at
+            .ok_or_else(|| eyre::eyre!("release does not have created_at"))?;
+        println!("{}", name);
+        print!("By {} on ", login);
+        created_at.format_into(
+            &mut std::io::stdout(),
+            &time::format_description::well_known::Rfc2822,
+        )?;
         println!();
-        println!("{}", crate::markdown(body));
-        println!();
-    }
-    let assets = release
-        .assets
-        .as_ref()
-        .ok_or_else(|| eyre::eyre!("release does not have assets"))?;
-    if !assets.is_empty() {
-        println!("{} assets", assets.len() + 2);
-        for asset in assets {
-            let name = asset
-                .name
-                .as_ref()
-                .ok_or_else(|| eyre::eyre!("asset does not have name"))?;
-            println!("{bullet} {}", name);
+        let SpecialRender { bullet, .. } = crate::special_render();
+        let body = release
+            .body
+            .as_ref()
+            .ok_or_else(|| eyre::eyre!("release does not have body"))?;
+        if !body.is_empty() {
+            println!();
+            println!("{}", crate::markdown(body));
+            println!();
         }
-        println!("{bullet} source.zip");
-        println!("{bullet} source.tar.gz");
-    }
+        let assets = release
+            .assets
+            .as_ref()
+            .ok_or_else(|| eyre::eyre!("release does not have assets"))?;
+        if !assets.is_empty() {
+            println!("{} assets", assets.len() + 2);
+            for asset in assets {
+                let name = asset
+                    .name
+                    .as_ref()
+                    .ok_or_else(|| eyre::eyre!("asset does not have name"))?;
+                println!("{bullet} {}", name);
+            }
+            println!("{bullet} source.zip");
+            println!("{bullet} source.tar.gz");
+        }
+        Ok(())
+    })?;
     Ok(())
 }
 
@@ -480,7 +479,7 @@ async fn create_asset(
     )
     .await?;
 
-    println!("Added attachment `{}` to {}", asset, release);
+    crate::output::success(&format!("Added attachment '{asset}' to {release}"));
 
     Ok(())
 }
@@ -508,7 +507,7 @@ async fn delete_asset(
         .ok_or_else(|| eyre::eyre!("asset does not have id"))?;
     api.repo_delete_release_attachment(repo.owner(), repo.name(), release_id, asset_id)
         .await?;
-    println!("Removed attachment `{}` from {}", asset_name, release_name);
+    crate::output::success(&format!("Removed attachment '{asset_name}' from {release_name}"));
     Ok(())
 }
 
@@ -568,9 +567,9 @@ async fn download_asset(
         .await?;
 
     if output.is_some() {
-        println!("Downloaded {asset} into {}", real_output.display());
+        crate::output::success(&format!("Downloaded {asset} into {}", real_output.display()));
     } else {
-        println!("Downloaded {asset}");
+        crate::output::success(&format!("Downloaded {asset}"));
     }
 
     Ok(())
@@ -617,5 +616,6 @@ async fn delete_release(
         api.repo_delete_release(repo.owner(), repo.name(), id)
             .await?;
     }
+    crate::output::success(&format!("Deleted release {name}"));
     Ok(())
 }

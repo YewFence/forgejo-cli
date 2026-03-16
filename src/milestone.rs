@@ -156,55 +156,30 @@ async fn list_milestones(
         .all()
         .await?;
 
-    let crate::SpecialRender {
-        bold,
-        bright_green,
-        bright_red,
-        dark_grey,
-        reset,
-        ..
-    } = crate::special_render();
-
-    if milestones.is_empty() {
-        println!("No milestones");
-        return Ok(());
-    }
-
-    if milestones.len() == 1 {
-        println!("1 milestone");
-    } else {
-        println!("{} milestones", milestones.len());
-    }
-
-    for ms in milestones {
-        let title = ms.title.as_deref().unwrap_or("?");
-        let open = ms.open_issues.unwrap_or(0);
-        let closed = ms.closed_issues.unwrap_or(0);
-        let state_str = match ms.state {
-            Some(forgejo_api::structs::StateType::Open) => {
-                format!("{bright_green}open{reset}")
-            }
-            Some(forgejo_api::structs::StateType::Closed) => {
-                format!("{bright_red}closed{reset}")
-            }
-            None => "?".to_string(),
-        };
-        let due = ms
-            .due_on
-            .map(|d| {
-                d.format(&time::macros::format_description!("[year]-[month]-[day]"))
-                    .unwrap_or_else(|_| "?".to_string())
-            })
-            .unwrap_or_default();
-        let due_str = if due.is_empty() {
-            String::new()
-        } else {
-            format!(" {dark_grey}due {due}{reset}")
-        };
-        println!(
-            "{bold}{title}{reset} {dark_grey}({open} open, {closed} closed){reset} {state_str}{due_str}"
-        );
-    }
+    crate::output::print_list(
+        &milestones,
+        &["TITLE", "STATE", "ISSUES", "DUE"],
+        |ms| {
+            let title = ms.title.as_deref().unwrap_or("?").to_string();
+            let state = ms
+                .state
+                .as_ref()
+                .map(crate::output::colored_state)
+                .unwrap_or_default();
+            let open = ms.open_issues.unwrap_or(0);
+            let closed = ms.closed_issues.unwrap_or(0);
+            let issues = format!("{open} open, {closed} closed");
+            let due = ms
+                .due_on
+                .as_ref()
+                .map(|d| {
+                    d.format(&time::macros::format_description!("[year]-[month]-[day]"))
+                        .unwrap_or_else(|_| "?".to_string())
+                })
+                .unwrap_or_default();
+            vec![title, state, issues, due]
+        },
+    );
     Ok(())
 }
 
@@ -215,51 +190,59 @@ async fn view_milestone(
 ) -> eyre::Result<()> {
     let ms = find_milestone(api, repo, name_or_id).await?;
 
-    let crate::SpecialRender {
-        bold,
-        yellow,
-        bright_green,
-        bright_red,
-        dark_grey,
-        reset,
-        dash,
-        ..
-    } = crate::special_render();
+    crate::output::print_or_json(&ms, || {
+        let crate::SpecialRender {
+            bold,
+            yellow,
+            bright_green,
+            bright_red,
+            dark_grey,
+            reset,
+            dash,
+            ..
+        } = crate::special_render();
 
-    let title = ms.title.as_deref().unwrap_or("?");
-    let open = ms.open_issues.unwrap_or(0);
-    let closed = ms.closed_issues.unwrap_or(0);
-    let total = open + closed;
-    let progress = if total > 0 {
-        format!("{}%", closed * 100 / total)
-    } else {
-        "no issues".to_string()
-    };
+        let title = ms.title.as_deref().unwrap_or("?");
+        let open = ms.open_issues.unwrap_or(0);
+        let closed = ms.closed_issues.unwrap_or(0);
+        let total = open + closed;
+        let progress = if total > 0 {
+            format!("{}%", closed * 100 / total)
+        } else {
+            "no issues".to_string()
+        };
 
-    let state_str = match ms.state {
-        Some(forgejo_api::structs::StateType::Open) => format!("{bright_green}open{reset}"),
-        Some(forgejo_api::structs::StateType::Closed) => format!("{bright_red}closed{reset}"),
-        None => "?".to_string(),
-    };
+        let state_str = match ms.state.as_ref() {
+            Some(forgejo_api::structs::StateType::Open) => {
+                format!("{bright_green}open{reset}")
+            }
+            Some(forgejo_api::structs::StateType::Closed) => {
+                format!("{bright_red}closed{reset}")
+            }
+            None => "?".to_string(),
+        };
 
-    println!("{yellow}{title}{reset} {dash} {state_str}");
-    println!(
-        "{open} open, {closed} closed {dark_grey}({progress}){reset}"
-    );
+        println!("{yellow}{title}{reset} {dash} {state_str}");
+        println!(
+            "{open} open, {closed} closed {dark_grey}({progress}){reset}"
+        );
 
-    if let Some(due) = ms.due_on {
-        let due_str = due
-            .format(&time::macros::format_description!("[year]-[month]-[day]"))
-            .unwrap_or_else(|_| "?".to_string());
-        println!("Due: {bold}{due_str}{reset}");
-    }
-
-    if let Some(desc) = &ms.description {
-        if !desc.is_empty() {
-            println!();
-            println!("{}", crate::markdown(desc));
+        if let Some(due) = ms.due_on.as_ref() {
+            let due_str = due
+                .format(&time::macros::format_description!("[year]-[month]-[day]"))
+                .unwrap_or_else(|_| "?".to_string());
+            println!("Due: {bold}{due_str}{reset}");
         }
-    }
+
+        if let Some(desc) = &ms.description {
+            if !desc.is_empty() {
+                println!();
+                println!("{}", crate::markdown(desc));
+            }
+        }
+
+        Ok(())
+    })?;
 
     Ok(())
 }
@@ -291,7 +274,7 @@ async fn create_milestone(
     };
     api.issue_create_milestone(repo.owner(), repo.name(), opt)
         .await?;
-    println!("created milestone '{title}'");
+    crate::output::success(&format!("Created milestone '{title}'"));
     Ok(())
 }
 
@@ -312,8 +295,8 @@ async fn edit_milestone(
     let display_title = title
         .as_deref()
         .or(ms.title.as_deref())
-        .unwrap_or("?");
-    let msg = format!("updated milestone '{display_title}'");
+        .unwrap_or("?")
+        .to_string();
 
     let opt = EditMilestoneOption {
         title,
@@ -323,7 +306,7 @@ async fn edit_milestone(
     };
     api.issue_edit_milestone(repo.owner(), repo.name(), id, opt)
         .await?;
-    println!("{msg}");
+    crate::output::success(&format!("Updated milestone '{display_title}'"));
     Ok(())
 }
 
@@ -339,9 +322,9 @@ async fn delete_milestone(
     if crate::prompt_bool(&format!("Delete milestone '{title}'?"), false).await? {
         api.issue_delete_milestone(repo.owner(), repo.name(), id)
             .await?;
-        println!("deleted milestone '{title}'");
+        crate::output::success(&format!("Deleted milestone '{title}'"));
     } else {
-        println!("not deleted");
+        crate::output::info("Not deleted");
     }
     Ok(())
 }
