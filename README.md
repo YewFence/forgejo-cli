@@ -1,4 +1,4 @@
-# `fj` -- Forgejo CLI Plus
+<p align="center"><img src="logo.png" alt="Forgejo CLI Plus" width="128"></p><h1 align="center">Forgejo CLI Plus</h1>
 
 > Like `gh` for GitHub, but for [Forgejo](https://forgejo.org).
 
@@ -19,6 +19,7 @@ Works alongside `git` to handle the Forgejo-specific stuff: issues, PRs, milesto
 | **User Management** | Profile editing, SSH/GPG keys, follow/block |
 | **Wiki** | View pages, clone wiki repos |
 | **Auth** | OAuth login, token-based auth, multi-instance |
+| **Automation** | `--json` output, `--yes` auto-confirm, `--verbose` diagnostics, `--force` / `--dry-run` on destructive ops |
 
 ### What's different from [upstream](https://codeberg.org/forgejo-contrib/forgejo-cli)?
 
@@ -26,15 +27,19 @@ Works alongside `git` to handle the Forgejo-specific stuff: issues, PRs, milesto
 - Milestone management -- list, view, create, edit, delete
 - `--milestone` flag on issue/PR create and search
 - Issue assignee editing (`--add` / `--rm`)
+- Tabular list output with aligned columns and colored status indicators
+- `--json` flag for machine-readable output on all list and view commands
+- `--yes` / `--verbose` global flags for scripting and automation
+- `--force` / `--dry-run` on all 14 destructive commands
 
 **Bug fixes:**
 - PKCE S256 code challenge for OAuth login
 - PR search pagination
 - Lowercase and extensionless README file detection
+- Relative time display for dates under 1 year
 
 **Project:**
 - Full command reference in the README
-- Support for agentic AI workflows (structured output, scriptable commands)
 - Open to contributions
 
 ---
@@ -62,6 +67,17 @@ If you're not in a repo, use `-H <host>` or set `FJ_FALLBACK_HOST`.
 
 Output is colorized in terminals, plain when piped. Force plain with `--style minimal`.
 
+### Automation / scripting
+
+Every command supports `--json` for machine-readable output. Use the global flags to skip prompts and get diagnostics:
+
+```sh
+fj --yes --json issue list                   # JSON output, no prompts
+fj --verbose issue view 42                   # print API calls to stderr
+fj repo delete owner/repo --dry-run          # preview without executing
+fj --yes repo delete owner/repo --force      # non-interactive delete
+```
+
 ---
 
 ## Command reference
@@ -72,6 +88,9 @@ Output is colorized in terminals, plain when piped. Force plain with `--style mi
 |---|---|
 | `-H, --host <HOST>` | Target Forgejo instance |
 | `--style <fancy\|minimal>` | Output style (auto-detected) |
+| `--json` | Machine-readable JSON output for list and view commands |
+| `-y, --yes` | Skip all confirmation prompts (auto-confirm) |
+| `-v, --verbose` | Print API calls and resolution steps to stderr |
 
 ---
 
@@ -86,12 +105,12 @@ fj repo view [repo]                         View info
 fj repo readme [repo]                       View README
 fj repo star [repo]                         Star
 fj repo unstar [repo]                       Unstar
-fj repo delete <repo>                       Delete (irreversible)
+fj repo delete <repo>                       Delete (-f force, --dry-run)
 fj repo browse [repo]                       Open in browser
 fj repo labels view                         List labels
 fj repo labels create <n> <c>               Create label
 fj repo labels edit <id>                    Edit label
-fj repo labels delete <id>                  Delete label
+fj repo labels delete <id>                  Delete label (-f force, --dry-run)
 ```
 
 ---
@@ -148,7 +167,7 @@ fj milestone list                           List milestones (-s state: open/clos
 fj milestone view <name>                    View details (by title or numeric ID)
 fj milestone create <title>                 Create (--body, --due YYYY-MM-DD)
 fj milestone edit <name>                    Edit (--title, --body, --due, --state)
-fj milestone delete <name>                  Delete
+fj milestone delete <name>                  Delete (-f force, --dry-run)
 ```
 
 ---
@@ -158,12 +177,12 @@ fj milestone delete <name>                  Delete
 ```
 fj release create <name>                    Create (-t tag, -T create tag, --attach, -b body, --draft, --prerelease)
 fj release edit <name>                      Edit
-fj release delete <name>                    Delete (-t by tag name)
+fj release delete <name>                    Delete (-t by tag name, -f force, --dry-run)
 fj release list                             List (--include-prerelease, --include-draft)
 fj release view <name>                      View (-t by tag name)
 fj release browse [name]                    Open in browser
 fj release asset create <r> <f>             Attach file
-fj release asset delete <r> <a>             Remove attachment
+fj release asset delete <r> <a>             Remove attachment (-f force, --dry-run)
 fj release asset download <r> <a>           Download attachment (-o output path)
 ```
 
@@ -173,7 +192,7 @@ fj release asset download <r> <a>           Download attachment (-o output path)
 
 ```
 fj tag create <name>                        Create (-b message, -B branch)
-fj tag delete <name>                        Delete
+fj tag delete <name>                        Delete (-f force, --dry-run)
 fj tag list                                 List (-p page)
 fj tag view <name>                          View
 ```
@@ -198,10 +217,10 @@ fj actions tasks                            List workflow tasks (-p page)
 fj actions dispatch <wf> <ref>              Dispatch workflow (-I key=value inputs)
 fj actions variables list                   List variables (-v verbose)
 fj actions variables create <n> [data]      Create variable (--force to overwrite, opens editor if no data)
-fj actions variables delete <n>             Delete variable
+fj actions variables delete <n>             Delete variable (-f force, --dry-run)
 fj actions secrets list                     List secrets
 fj actions secrets create <n> <d>           Create secret
-fj actions secrets delete <n>               Delete secret
+fj actions secrets delete <n>               Delete secret (-f force, --dry-run)
 ```
 
 ---
@@ -224,13 +243,13 @@ fj org team list <org>                      List teams
 fj org team view <org> <team>               View team
 fj org team create <org> <team>             Create team
 fj org team edit <org> <team>               Edit team
-fj org team delete <org> <team>             Delete team
+fj org team delete <org> <team>             Delete team (-f force, --dry-run)
 fj org team repo list <org> <team>          Team repos
 fj org team repo add <org> <team> <repo>    Add repo to team
-fj org team repo rm <org> <team> <repo>     Remove repo from team
+fj org team repo rm <org> <team> <repo>     Remove repo from team (-f force, --dry-run)
 fj org team member list <org> <team>        Team members
 fj org team member add <org> <team> <u>     Add member
-fj org team member rm <org> <team> <u>      Remove member
+fj org team member rm <org> <team> <u>      Remove member (-f force, --dry-run)
 ```
 
 **Labels:**
@@ -238,7 +257,7 @@ fj org team member rm <org> <team> <u>      Remove member
 fj org label list <org>                     List org labels
 fj org label add <org> <n> <c>              Add label
 fj org label edit <org> <n>                 Edit label
-fj org label rm <org> <n>                   Remove label
+fj org label rm <org> <n>                   Remove label (-f force, --dry-run)
 ```
 
 **Repos:**
@@ -282,7 +301,7 @@ fj user edit activity                       Activity visibility
 fj user key list                            List keys
 fj user key upload [file]                   Upload key (-t title, --force, -r read-only)
 fj user key view <id>                       View key
-fj user key delete <id>                     Delete key
+fj user key delete <id>                     Delete key (-f force, --dry-run)
 ```
 
 **GPG keys:**
@@ -290,7 +309,7 @@ fj user key delete <id>                     Delete key
 fj user gpg list                            List keys
 fj user gpg upload <key>                    Upload key (--no-verify to skip verification)
 fj user gpg view <id>                       View key
-fj user gpg delete <id>                     Delete key
+fj user gpg delete <id>                     Delete key (-f force, --dry-run)
 fj user gpg verify <id>                     Verify key
 ```
 
