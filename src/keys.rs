@@ -63,9 +63,15 @@ impl KeyInfo {
 
     pub async fn get_api(&mut self, url: &Url) -> eyre::Result<Forgejo> {
         match self.get_login(url) {
-            Some(login) => login.api_for(url).await,
-            None => Forgejo::with_user_agent(Auth::None, url.clone(), crate::USER_AGENT)
-                .map_err(Into::into),
+            Some(login) => {
+                crate::verbose_log!("Using saved login for {}", crate::host_name(url));
+                login.api_for(url).await
+            }
+            None => {
+                crate::verbose_log!("No saved login for {}, using unauthenticated access", crate::host_name(url));
+                Forgejo::with_user_agent(Auth::None, url.clone(), crate::USER_AGENT)
+                    .map_err(Into::into)
+            }
         }
     }
 

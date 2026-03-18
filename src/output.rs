@@ -99,6 +99,25 @@ pub fn info(msg: &str) {
     eprintln!("{dark_grey}{msg}{reset}");
 }
 
+/// Print a verbose message to stderr.
+///
+/// Callers are responsible for gating on `verbose_mode()`.
+/// The `verbose_log!` macro does this automatically.
+pub fn verbose(msg: &str) {
+    let crate::SpecialRender {
+        dark_grey, reset, ..
+    } = crate::special_render();
+    eprintln!("{dark_grey}[verbose] {msg}{reset}");
+}
+
+/// Print a dry-run preview message to stderr.
+pub fn dry_run(msg: &str) {
+    let crate::SpecialRender {
+        yellow, reset, ..
+    } = crate::special_render();
+    eprintln!("{yellow}[dry-run]{reset} Would {msg}");
+}
+
 /// Format a relative time string from an OffsetDateTime (e.g., "2h", "3d").
 pub fn relative_time(dt: &time::OffsetDateTime) -> String {
     let now = time::OffsetDateTime::now_utc();

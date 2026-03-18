@@ -39,6 +39,47 @@ Follow `src/tag.rs` as the template.
 - Name-to-ID resolution: try numeric ID via direct API first, fall back to name search with server-side filter
 - Naming: org labels/team-repos/team-members use `Rm`; everything else uses `Delete`. Match existing pattern per module.
 
+## Agentic / non-interactive flags
+
+Global flags (on every command):
+- `--yes` / `-y` -- skip all confirmation prompts, auto-confirm
+- `--verbose` / `-v` -- print API calls and resolution steps to stderr
+- `--json` -- machine-readable JSON output
+
+Per-command flags (on destructive operations only):
+- `--force` / `-f` -- skip confirmation prompt for this operation
+- `--dry-run` -- preview what would happen without executing
+
+Example agent invocation:
+```sh
+fj --yes --json issue list
+fj --yes --json repo delete owner/repo --force
+fj repo delete owner/repo --dry-run
+```
+
+## Adding a destructive command
+
+Every delete/remove operation must follow this pattern:
+
+1. Add `force: bool` (`--force`/`-f`) and `dry_run: bool` (`--dry-run`) to the subcommand variant
+2. In the handler function, check dry-run first, then confirmation, then execute:
+
+```rust
+if dry_run {
+    crate::output::dry_run(&format!("delete thing {name}"));
+    return Ok(());
+}
+if !force && !crate::yes_mode() {
+    if !crate::prompt_bool(&format!("Delete '{name}'?"), false).await? {
+        crate::output::info("Not deleted");
+        return Ok(());
+    }
+}
+crate::verbose_log!("Deleting {name}");
+// ... API call ...
+crate::output::success(&format!("Deleted {name}"));
+```
+
 ## Upstream sync
 
 ```sh

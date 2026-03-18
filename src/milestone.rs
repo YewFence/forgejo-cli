@@ -68,6 +68,12 @@ pub enum MilestoneSubcommand {
     Delete {
         /// Milestone title or numeric ID
         name: String,
+        /// Skip confirmation prompt
+        #[clap(long, short = 'f')]
+        force: bool,
+        /// Preview without executing
+        #[clap(long)]
+        dry_run: bool,
     },
 }
 
@@ -96,7 +102,9 @@ impl MilestoneCommand {
                 due,
                 state,
             } => edit_milestone(repo, &api, &name, title, body, due, state).await?,
-            MilestoneSubcommand::Delete { name } => delete_milestone(repo, &api, &name).await?,
+            MilestoneSubcommand::Delete { name, force, dry_run } => {
+                delete_milestone(repo, &api, &name, force, dry_run).await?
+            }
         }
         Ok(())
     }
@@ -114,11 +122,13 @@ pub async fn find_milestone(
             .issue_get_milestone(repo.owner(), repo.name(), id)
             .await
         {
+            crate::verbose_log!("Resolved milestone '{}' by numeric ID", name_or_id);
             return Ok(ms);
         }
     }
 
     // Fall back to name search (server-side filter, exact match verified client-side)
+    crate::verbose_log!("Looking up milestone '{}' by name", name_or_id);
     let query = IssueGetMilestonesListQuery {
         state: Some("all".to_string()),
         name: Some(name_or_id.to_string()),
@@ -314,17 +324,32 @@ async fn delete_milestone(
     repo: &RepoName,
     api: &Forgejo,
     name_or_id: &str,
+    force: bool,
+    dry_run: bool,
 ) -> eyre::Result<()> {
     let ms = find_milestone(api, repo, name_or_id).await?;
     let id = ms.id.ok_or_eyre("milestone does not have id")?;
     let title = ms.title.as_deref().unwrap_or("?");
 
-    if crate::prompt_bool(&format!("Delete milestone '{title}'?"), false).await? {
-        api.issue_delete_milestone(repo.owner(), repo.name(), id)
-            .await?;
-        crate::output::success(&format!("Deleted milestone '{title}'"));
-    } else {
-        crate::output::info("Not deleted");
+    if dry_run {
+        crate::output::dry_run(&format!(
+            "delete milestone '{title}' on {}/{}",
+            repo.owner(),
+            repo.name()
+        ));
+        return Ok(());
     }
+
+    if !force && !crate::yes_mode() {
+        if !crate::prompt_bool(&format!("Delete milestone '{title}'?"), false).await? {
+            crate::output::info("Not deleted");
+            return Ok(());
+        }
+    }
+
+    crate::verbose_log!("Deleting milestone '{title}' on {}/{}", repo.owner(), repo.name());
+    api.issue_delete_milestone(repo.owner(), repo.name(), id)
+        .await?;
+    crate::output::success(&format!("Deleted milestone '{title}'"));
     Ok(())
 }

@@ -192,6 +192,16 @@ impl RepoInfo {
             url
         });
 
+        if let Some(ref u) = url {
+            crate::verbose_log!(
+                "Resolved repo: host={}, repo={}",
+                crate::host_name(u),
+                name.as_ref()
+                    .map(|n| format!("{}/{}", n.owner, n.name))
+                    .unwrap_or_else(|| "(none)".into())
+            );
+        }
+
         let info = match (url, name) {
             (Some(url), name) => RepoInfo {
                 url,
@@ -437,7 +447,15 @@ pub enum RepoCommand {
     /// Delete a repository
     ///
     /// This cannot be undone!
-    Delete { repo: RepoArg },
+    Delete {
+        repo: RepoArg,
+        /// Skip confirmation prompt
+        #[clap(long, short = 'f')]
+        force: bool,
+        /// Preview without executing
+        #[clap(long)]
+        dry_run: bool,
+    },
     /// Open a repository's page in your browser
     Browse {
         name: Option<RepoArg>,
@@ -582,11 +600,11 @@ impl RepoCommand {
                     .await?;
                 crate::output::success(&format!("Removed star from {}/{}", name.owner(), name.name()));
             }
-            RepoCommand::Delete { repo } => {
+            RepoCommand::Delete { repo, force, dry_run } => {
                 let repo = RepoInfo::get_current(host_name, Some(&repo), None, &keys)?;
                 let api = keys.get_api(repo.host_url()).await?;
                 let name = repo.name().unwrap();
-                delete_repo(&api, name).await?;
+                delete_repo(&api, name, force, dry_run).await?;
             }
             RepoCommand::Browse { name, remote } => {
                 let repo =
@@ -633,7 +651,7 @@ impl RepoCommand {
             }
             RepoCommand::Labels {
                 repo,
-                cmd: LabelsSubcommand::Delete { id },
+                cmd: LabelsSubcommand::Delete { id, force, dry_run },
             } => {
                 let repo = RepoInfo::get_current(host_name, repo.as_ref(), None, &keys)?;
                 let api = keys.get_api(repo.host_url()).await?;
@@ -641,7 +659,7 @@ impl RepoCommand {
                     .name()
                     .ok_or_eyre("couldn't get repo name, please specify")?;
 
-                delete_repo_label(&api, &repo, id).await?;
+                delete_repo_label(&api, &repo, id, force, dry_run).await?;
             }
             RepoCommand::Labels {
                 repo,
@@ -712,6 +730,12 @@ pub enum LabelsSubcommand {
     Delete {
         /// The ID or name of the label to delete
         id: String,
+        /// Skip confirmation prompt
+        #[clap(long, short = 'f')]
+        force: bool,
+        /// Preview without executing
+        #[clap(long)]
+        dry_run: bool,
     },
 
     /// Edit a label
@@ -1310,20 +1334,32 @@ pub fn load_ssh_keys(
     auth
 }
 
-async fn delete_repo(api: &Forgejo, name: &RepoName) -> eyre::Result<()> {
-    print!(
-        "Are you sure you want to delete {}/{}? (y/N) ",
-        name.owner(),
-        name.name()
-    );
-    let user_response = crate::readline("").await?;
-    let yes = matches!(user_response.trim(), "y" | "Y" | "yes" | "Yes");
-    if yes {
-        api.repo_delete(name.owner(), name.name()).await?;
-        crate::output::success(&format!("Deleted {}/{}", name.owner(), name.name()));
-    } else {
-        crate::output::info("Did not delete");
+async fn delete_repo(
+    api: &Forgejo,
+    name: &RepoName,
+    force: bool,
+    dry_run: bool,
+) -> eyre::Result<()> {
+    if dry_run {
+        crate::output::dry_run(&format!("delete repository {}/{}", name.owner(), name.name()));
+        return Ok(());
     }
+
+    if !force && !crate::yes_mode() {
+        if !crate::prompt_bool(
+            &format!("Delete repository {}/{}? This cannot be undone!", name.owner(), name.name()),
+            false,
+        )
+        .await?
+        {
+            crate::output::info("Not deleted");
+            return Ok(());
+        }
+    }
+
+    crate::verbose_log!("Deleting repository {}/{}", name.owner(), name.name());
+    api.repo_delete(name.owner(), name.name()).await?;
+    crate::output::success(&format!("Deleted {}/{}", name.owner(), name.name()));
     Ok(())
 }
 
@@ -1388,12 +1424,33 @@ async fn create_repo_label(
     Ok(())
 }
 
-async fn delete_repo_label(api: &Forgejo, repo: &RepoName, name: String) -> eyre::Result<()> {
-    let id = find_user_label(api, repo, &name).await?;
+async fn delete_repo_label(
+    api: &Forgejo,
+    repo: &RepoName,
+    name: String,
+    force: bool,
+    dry_run: bool,
+) -> eyre::Result<()> {
+    if dry_run {
+        crate::output::dry_run(&format!(
+            "delete label {name} on {}/{}",
+            repo.owner(),
+            repo.name()
+        ));
+        return Ok(());
+    }
 
+    if !force && !crate::yes_mode() {
+        if !crate::prompt_bool(&format!("Delete label '{name}'?"), false).await? {
+            crate::output::info("Not deleted");
+            return Ok(());
+        }
+    }
+
+    crate::verbose_log!("Deleting label {name} on {}/{}", repo.owner(), repo.name());
+    let id = find_user_label(api, repo, &name).await?;
     api.issue_delete_label(repo.owner(), repo.name(), id)
         .await?;
-
     crate::output::success(&format!("Deleted label {name}"));
     Ok(())
 }

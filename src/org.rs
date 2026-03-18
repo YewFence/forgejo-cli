@@ -494,6 +494,12 @@ pub enum LabelSubcommand {
         org: String,
         /// The name of the label to remove from the organization.
         label: String,
+        /// Skip confirmation prompt
+        #[clap(long, short = 'f')]
+        force: bool,
+        /// Preview without executing
+        #[clap(long)]
+        dry_run: bool,
     },
 }
 
@@ -529,7 +535,9 @@ impl LabelSubcommand {
                 )
                 .await?
             }
-            LabelSubcommand::Rm { org, label } => remove_org_label(&api, org, label).await?,
+            LabelSubcommand::Rm { org, label, force, dry_run } => {
+                remove_org_label(&api, org, label, force, dry_run).await?
+            }
         }
         Ok(())
     }
@@ -624,7 +632,26 @@ async fn edit_org_label(
     Ok(())
 }
 
-async fn remove_org_label(api: &Forgejo, org: String, name: String) -> eyre::Result<()> {
+async fn remove_org_label(
+    api: &Forgejo,
+    org: String,
+    name: String,
+    force: bool,
+    dry_run: bool,
+) -> eyre::Result<()> {
+    if dry_run {
+        crate::output::dry_run(&format!("remove label {name} from org {org}"));
+        return Ok(());
+    }
+
+    if !force && !crate::yes_mode() {
+        if !crate::prompt_bool(&format!("Remove label '{name}' from org '{org}'?"), false).await? {
+            crate::output::info("Not removed");
+            return Ok(());
+        }
+    }
+
+    crate::verbose_log!("Removing label {name} from org {org}");
     let label = find_label_by_name(api, &org, &name)
         .await?
         .ok_or_eyre("label not found")?;

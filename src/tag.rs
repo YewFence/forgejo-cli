@@ -33,7 +33,15 @@ pub enum TagSubcommand {
         branch: Option<String>,
     },
     /// Delete a tag
-    Delete { name: String },
+    Delete {
+        name: String,
+        /// Skip confirmation prompt
+        #[clap(long, short = 'f')]
+        force: bool,
+        /// Preview without executing
+        #[clap(long)]
+        dry_run: bool,
+    },
     /// List all the tags on a repo
     List {
         #[clap(long, short, default_value_t = 1)]
@@ -59,7 +67,9 @@ impl TagCommand {
             TagSubcommand::Create { name, body, branch } => {
                 create_tag(repo, &api, name, body, branch).await?
             }
-            TagSubcommand::Delete { name } => delete_tag(repo, &api, name).await?,
+            TagSubcommand::Delete { name, force, dry_run } => {
+                delete_tag(repo, &api, name, force, dry_run).await?
+            }
             TagSubcommand::List { page } => list_tags(repo, &api, page).await?,
             TagSubcommand::View { name } => view_tag(repo, &api, name).await?,
         }
@@ -94,7 +104,30 @@ async fn create_tag(
     Ok(())
 }
 
-async fn delete_tag(repo: &RepoName, api: &Forgejo, name: String) -> eyre::Result<()> {
+async fn delete_tag(
+    repo: &RepoName,
+    api: &Forgejo,
+    name: String,
+    force: bool,
+    dry_run: bool,
+) -> eyre::Result<()> {
+    if dry_run {
+        crate::output::dry_run(&format!(
+            "delete tag {name} on {}/{}",
+            repo.owner(),
+            repo.name()
+        ));
+        return Ok(());
+    }
+
+    if !force && !crate::yes_mode() {
+        if !crate::prompt_bool(&format!("Delete tag '{name}'?"), false).await? {
+            crate::output::info("Not deleted");
+            return Ok(());
+        }
+    }
+
+    crate::verbose_log!("Deleting tag {name} on {}/{}", repo.owner(), repo.name());
     api.repo_delete_tag(repo.owner(), repo.name(), &name)
         .await?;
     crate::output::success(&format!("Deleted tag {name}"));

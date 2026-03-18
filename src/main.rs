@@ -43,6 +43,12 @@ pub struct App {
     /// Output results as JSON (for scripting and agents)
     #[clap(long)]
     json: bool,
+    /// Skip all confirmation prompts (auto-confirm destructive actions)
+    #[clap(long, short = 'y', global = true)]
+    yes: bool,
+    /// Show verbose output (API calls, resolution steps)
+    #[clap(long, short = 'v', global = true)]
+    verbose: bool,
     #[clap(subcommand)]
     command: Command,
 }
@@ -96,6 +102,8 @@ async fn main() -> eyre::Result<()> {
 
     let _ = SPECIAL_RENDER.set(SpecialRender::new(args.style.unwrap_or_default()));
     let _ = JSON_MODE.set(args.json);
+    let _ = YES_MODE.set(args.yes);
+    let _ = VERBOSE_MODE.set(args.verbose);
 
     let mut keys = KeyInfo::load().await?;
     let r = args.command.run(&mut keys, args.host.as_deref()).await;
@@ -118,6 +126,10 @@ async fn readline(msg: &str) -> eyre::Result<String> {
 }
 
 async fn prompt_bool(msg: &str, default_answer: bool) -> eyre::Result<bool> {
+    if yes_mode() {
+        return Ok(true);
+    }
+
     let msg = if default_answer {
         format!("{msg} [Y/n]: ")
     } else {
@@ -142,6 +154,13 @@ async fn prompt_bool(msg: &str, default_answer: bool) -> eyre::Result<bool> {
 }
 
 async fn editor(contents: &mut String, ext: Option<&str>) -> eyre::Result<()> {
+    if yes_mode() && contents.is_empty() {
+        eyre::bail!(
+            "No content provided and --yes flag prevents interactive editor. \
+             Provide content using --body or --body-file flags."
+        );
+    }
+
     let editor = std::path::PathBuf::from(
         std::env::var_os("EDITOR").ok_or_else(|| eyre!("unable to locate editor"))?,
     );
@@ -243,9 +262,28 @@ use std::sync::OnceLock;
 static SPECIAL_RENDER: OnceLock<SpecialRender> = OnceLock::new();
 
 static JSON_MODE: OnceLock<bool> = OnceLock::new();
+static YES_MODE: OnceLock<bool> = OnceLock::new();
+static VERBOSE_MODE: OnceLock<bool> = OnceLock::new();
+
+#[macro_export]
+macro_rules! verbose_log {
+    ($($arg:tt)*) => {
+        if $crate::verbose_mode() {
+            $crate::output::verbose(&format!($($arg)*));
+        }
+    };
+}
 
 fn json_mode() -> bool {
     *JSON_MODE.get().unwrap_or(&false)
+}
+
+fn yes_mode() -> bool {
+    *YES_MODE.get().unwrap_or(&false)
+}
+
+fn verbose_mode() -> bool {
+    *VERBOSE_MODE.get().unwrap_or(&false)
 }
 
 fn special_render() -> &'static SpecialRender {
