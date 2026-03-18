@@ -681,20 +681,20 @@ async fn get_pr_status(repo: &RepoName, api: &Forgejo, id: Option<i64>) -> eyre:
             .sha
             .as_deref()
             .ok_or_eyre("commit does not have sha")?;
-        let mut commit_statuses = api
+        let mut commit_statuses = match api
             .repo_get_combined_status_by_ref(repo.owner(), repo.name(), sha)
-            .stream_pages()
-            .map_ok(|page| {
-                futures::stream::iter(
-                    page.statuses
-                        .unwrap_or_default()
-                        .into_iter()
-                        .map(Result::<_, forgejo_api::ForgejoError>::Ok),
-                )
-            })
-            .try_flatten()
-            .try_collect::<Vec<_>>()
-            .await?;
+            .send()
+            .await
+        {
+            Ok((_, combined)) => combined.statuses.unwrap_or_default(),
+            Err(forgejo_api::ForgejoError::BadStructure(_)) => {
+                // Forgejo returns an empty string for the status field when no
+                // CI checks exist, which fails deserialization. Treat this as
+                // "no statuses".
+                Vec::new()
+            }
+            Err(e) => return Err(e.into()),
+        };
         commit_statuses.sort_by(|a, b| a.context.cmp(&b.context));
 
         Ok(PrStatus::Open {
