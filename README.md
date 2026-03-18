@@ -1,4 +1,4 @@
-<p align="center"><img src="logo.png" alt="Forgejo CLI Plus" width="128"></p><h1 align="center">Forgejo CLI Plus</h1>
+<h1 align="center"><img src="logo.png" alt="" width="128"><br>Forgejo CLI <b><i>Plus</i></b></h1>
 
 > Like `gh` for GitHub, but for [Forgejo](https://forgejo.org).
 
