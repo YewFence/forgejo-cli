@@ -49,6 +49,9 @@ pub enum IssueSubcommand {
         /// Milestone to assign (name or numeric ID)
         #[clap(long, short = 'M')]
         milestone: Option<String>,
+        /// Assign users (repeatable, e.g. --assignee alice --assignee bob)
+        #[clap(long = "assignee")]
+        assignees: Vec<String>,
         /// The repo to create this issue on
         #[clap(long, short)]
         repo: Option<RepoArg>,
@@ -77,6 +80,13 @@ pub enum IssueSubcommand {
     Close {
         issue: IssueId,
         /// A comment to leave on the issue before closing it
+        #[clap(long, short)]
+        with_msg: Option<Option<String>>,
+    },
+    /// Reopen a closed issue
+    Reopen {
+        issue: IssueId,
+        /// A comment to leave on the issue before reopening it
         #[clap(long, short)]
         with_msg: Option<Option<String>>,
     },
@@ -238,6 +248,7 @@ impl IssueCommand {
                 template,
                 no_template,
                 milestone,
+                assignees,
                 web,
             } => {
                 create_issue(
@@ -249,6 +260,7 @@ impl IssueCommand {
                     template,
                     no_template,
                     milestone,
+                    assignees,
                     web,
                 )
                 .await?
@@ -286,6 +298,7 @@ impl IssueCommand {
                 }
             },
             Close { issue, with_msg } => close_issue(repo, &api, issue.number, with_msg).await?,
+            Reopen { issue, with_msg } => reopen_issue(repo, &api, issue.number, with_msg).await?,
             Browse { id } => browse_issue(repo, &api, id.number).await?,
             Comment {
                 issue,
@@ -303,6 +316,7 @@ impl IssueCommand {
             View { id: issue, .. }
             | Edit { issue, .. }
             | Close { issue, .. }
+            | Reopen { issue, .. }
             | Comment { issue, .. }
             | Browse { id: issue, .. } => issue.repo.as_ref(),
         }
@@ -317,6 +331,7 @@ impl IssueCommand {
             View { id: issue, .. }
             | Edit { issue, .. }
             | Close { issue, .. }
+            | Reopen { issue, .. }
             | Comment { issue, .. }
             | Browse { id: issue, .. } => eyre::eyre!(
                 "can't figure out what repo to access, try specifying with `{{owner}}/{{repo}}#{}`",
@@ -365,6 +380,7 @@ async fn create_issue(
     template: Option<String>,
     no_template: bool,
     milestone: Option<String>,
+    assignees: Vec<String>,
     web: bool,
 ) -> eyre::Result<()> {
     match (title, web) {
@@ -395,6 +411,8 @@ async fn create_issue(
                 .blank_issues_enabled
                 .unwrap_or(true);
 
+            let assignees = if assignees.is_empty() { None } else { Some(assignees) };
+
             let opts = if let Some(template_name) = template {
                 eyre::ensure!(
                     has_templates,
@@ -412,7 +430,7 @@ async fn create_issue(
                     body: Some(body),
                     title,
                     assignee: None,
-                    assignees: None,
+                    assignees: assignees.clone(),
                     closed: None,
                     due_date: None,
                     labels: maybe_label_names_to_ids(repo, api, metadata.labels).await?,
@@ -447,7 +465,7 @@ async fn create_issue(
                     body: Some(body),
                     title,
                     assignee: None,
-                    assignees: None,
+                    assignees,
                     closed: None,
                     due_date: None,
                     labels: None,
@@ -542,6 +560,16 @@ pub async fn view_issue(repo: &RepoName, api: &Forgejo, id: i64) -> eyre::Result
         if let Some(ms) = &issue.milestone {
             if let Some(title) = ms.title.as_deref() {
                 println!("Milestone: {title}");
+            }
+        }
+
+        if let Some(assignees) = &issue.assignees {
+            let names: Vec<&str> = assignees
+                .iter()
+                .filter_map(|u| u.login.as_deref())
+                .collect();
+            if !names.is_empty() {
+                println!("Assignees: {}", names.join(", "));
             }
         }
 
@@ -958,7 +986,7 @@ pub async fn edit_comment(
     Ok(())
 }
 
-async fn edit_assignees(
+pub async fn edit_assignees(
     repo: &RepoName,
     api: &Forgejo,
     issue: i64,
@@ -1046,6 +1074,50 @@ pub async fn close_issue(
         .await?;
 
     crate::output::success(&format!("Closed issue #{issue}"));
+
+    Ok(())
+}
+
+pub async fn reopen_issue(
+    repo: &RepoName,
+    api: &Forgejo,
+    issue: i64,
+    message: Option<Option<String>>,
+) -> eyre::Result<()> {
+    if let Some(message) = message {
+        let body = match message {
+            Some(m) => m,
+            None => {
+                let mut s = String::new();
+                crate::editor(&mut s, Some("md")).await?;
+                s
+            }
+        };
+
+        let opt = CreateIssueCommentOption {
+            body,
+            updated_at: None,
+        };
+        api.issue_create_comment(repo.owner(), repo.name(), issue, opt)
+            .await?;
+    }
+
+    let edit = EditIssueOption {
+        state: Some("open".into()),
+        assignee: None,
+        assignees: None,
+        body: None,
+        due_date: None,
+        milestone: None,
+        r#ref: None,
+        title: None,
+        unset_due_date: None,
+        updated_at: None,
+    };
+    api.issue_edit_issue(repo.owner(), repo.name(), issue, edit)
+        .await?;
+
+    crate::output::success(&format!("Reopened issue #{issue}"));
 
     Ok(())
 }

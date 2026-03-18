@@ -79,6 +79,9 @@ pub enum PrSubcommand {
         /// Milestone to assign (name or numeric ID)
         #[clap(long, short = 'M')]
         milestone: Option<String>,
+        /// Assign users (repeatable, e.g. --assignee alice --assignee bob)
+        #[clap(long = "assignee")]
+        assignees: Vec<String>,
         /// The repo to create this pull request on
         #[clap(long, short)]
         repo: Option<RepoArg>,
@@ -147,6 +150,16 @@ pub enum PrSubcommand {
         /// The pull request to close.
         pr: Option<IssueId>,
         /// A comment to add before closing.
+        ///
+        /// Adding without an argument will open your editor
+        #[clap(long, short)]
+        with_msg: Option<Option<String>>,
+    },
+    /// Reopen a closed pull request.
+    Reopen {
+        /// The pull request to reopen.
+        pr: Option<IssueId>,
+        /// A comment to add before reopening.
         ///
         /// Adding without an argument will open your editor
         #[clap(long, short)]
@@ -250,11 +263,21 @@ pub enum EditCommand {
         /// Leaving this out will open the current body in your editor.
         new_body: Option<String>,
     },
+    /// Edit a PR's labels
     Labels {
         /// The labels to add.
         #[clap(long, short)]
         add: Vec<String>,
         /// The labels to remove.
+        #[clap(long, short)]
+        rm: Vec<String>,
+    },
+    /// Edit a PR's assignees
+    Assignees {
+        /// Usernames to add as assignees.
+        #[clap(long, short)]
+        add: Vec<String>,
+        /// Usernames to remove from assignees.
         #[clap(long, short)]
         rm: Vec<String>,
     },
@@ -308,6 +331,7 @@ impl PrCommand {
                 body_file,
                 autofill,
                 milestone,
+                assignees,
                 repo: _,
                 web,
                 agit,
@@ -322,6 +346,7 @@ impl PrCommand {
                     body_file,
                     autofill,
                     milestone,
+                    assignees,
                     web,
                     agit,
                     repo_info.remote_name(),
@@ -396,11 +421,19 @@ impl PrCommand {
                     EditCommand::Labels { add, rm } => {
                         edit_pr_labels(repo, &api, pr, add, rm).await?
                     }
+                    EditCommand::Assignees { add, rm } => {
+                        let (repo, id) = try_get_pr_number(repo, &api, pr).await?;
+                        crate::issues::edit_assignees(&repo, &api, id, add, rm).await?
+                    }
                 }
             }
             Close { pr, with_msg } => {
                 let (repo, pr) = try_get_pr_number(repo, &api, pr.map(|pr| pr.number)).await?;
                 crate::issues::close_issue(&repo, &api, pr, with_msg).await?
+            }
+            Reopen { pr, with_msg } => {
+                let (repo, pr) = try_get_pr_number(repo, &api, pr.map(|pr| pr.number)).await?;
+                crate::issues::reopen_issue(&repo, &api, pr, with_msg).await?
             }
             Checkout {
                 pr,
@@ -440,6 +473,7 @@ impl PrCommand {
             | Comment { pr, .. }
             | Edit { pr, .. }
             | Close { pr, .. }
+            | Reopen { pr, .. }
             | Merge { pr, .. }
             | Browse { id: pr } => pr.as_ref().and_then(|x| x.repo.as_ref()),
         }
@@ -463,6 +497,7 @@ impl PrCommand {
             | Comment { pr, .. }
             | Edit { pr, .. }
             | Close { pr, .. }
+            | Reopen { pr, .. }
             | Merge { pr, .. }
             | Browse { id: pr, .. } => match pr {
                 Some(pr) => eyre::eyre!(
@@ -571,6 +606,16 @@ pub async fn view_pr(repo: &RepoName, api: &Forgejo, id: Option<i64>) -> eyre::R
         if let Some(ms) = &pr.milestone {
             if let Some(title) = ms.title.as_deref() {
                 println!("Milestone: {title}");
+            }
+        }
+
+        if let Some(assignees) = &pr.assignees {
+            let names: Vec<&str> = assignees
+                .iter()
+                .filter_map(|u| u.login.as_deref())
+                .collect();
+            if !names.is_empty() {
+                println!("Assignees: {}", names.join(", "));
             }
         }
 
@@ -864,6 +909,7 @@ async fn create_pr(
     body_file: Option<PathBuf>,
     autofill: bool,
     milestone: Option<String>,
+    assignees: Vec<String>,
     web: bool,
     agit: bool,
     remote_name: Option<&str>,
@@ -1012,7 +1058,7 @@ async fn create_pr(
             Some((head, head_branch_name)) => {
                 let base_opt = CreatePullRequestOption {
                     assignee: None,
-                    assignees: None,
+                    assignees: if assignees.is_empty() { None } else { Some(assignees) },
                     base: Some(base.to_owned()),
                     body: None,
                     due_date: None,
