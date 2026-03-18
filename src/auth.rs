@@ -1,5 +1,6 @@
 use clap::Subcommand;
 use eyre::OptionExt;
+use sha2::Digest;
 
 use std::collections::BTreeMap;
 #[cfg(unix)]
@@ -204,15 +205,8 @@ async fn oauth_login(
     let code_verifier = (0..43)
         .map(|_| rng.sample(Alphanumeric) as char)
         .collect::<String>();
-    let hex_hash = sha256::digest(&code_verifier);
-    let raw_hash: Vec<u8> = (0..hex_hash.len())
-        .step_by(2)
-        .map(|i| {
-            u8::from_str_radix(&hex_hash[i..i + 2], 16)
-                .expect("sha256::digest always returns valid hex")
-        })
-        .collect();
-    let code_challenge = base64ct::Base64UrlUnpadded::encode_string(&raw_hash);
+    let code_challenge =
+        base64ct::Base64UrlUnpadded::encode_string(sha2::Sha256::digest(&code_verifier).as_slice());
 
     let mut auth_url = host.clone();
     auth_url
@@ -367,36 +361,15 @@ mod tests {
     fn pkce_s256_matches_rfc7636_test_vector() {
         // RFC 7636 Appendix B test vector
         use base64ct::Encoding;
+        use sha2::Digest;
 
         let code_verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
         let expected = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
 
-        let hex_hash = sha256::digest(code_verifier);
-        let raw_hash: Vec<u8> = (0..hex_hash.len())
-            .step_by(2)
-            .map(|i| {
-                u8::from_str_radix(&hex_hash[i..i + 2], 16)
-                    .expect("sha256::digest always returns valid hex")
-            })
-            .collect();
-        let challenge = base64ct::Base64UrlUnpadded::encode_string(&raw_hash);
+        let challenge =
+            base64ct::Base64UrlUnpadded::encode_string(sha2::Sha256::digest(code_verifier).as_slice());
 
         assert_eq!(challenge, expected, "PKCE S256 challenge must match RFC 7636 Appendix B");
-    }
-
-    #[test]
-    fn pkce_old_method_is_wrong() {
-        // Prove the old method produces the WRONG result
-        use base64ct::Encoding;
-
-        let code_verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
-        let expected = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
-
-        let old_challenge = base64ct::Base64Url::encode_string(
-            sha256::digest(code_verifier).as_bytes(),
-        );
-
-        assert_ne!(old_challenge, expected, "Old method should NOT match RFC 7636");
     }
 }
 
