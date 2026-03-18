@@ -735,15 +735,24 @@ pub fn print_activity(activity: &forgejo_api::structs::Activity) -> eyre::Result
         .as_deref()
         .ok_or_eyre("repo does not have full name");
 
-    fn issue_name<'a, 'b>(
+    fn issue_name<'a>(
         repo: &'a forgejo_api::structs::Repository,
-        content: &'b str,
-    ) -> eyre::Result<(&'a str, &'b str)> {
+        content: &str,
+    ) -> eyre::Result<(&'a str, String)> {
         let full_name = repo
             .full_name
             .as_deref()
             .ok_or_eyre("repo does not have full name")?;
-        let (issue_id, _issue_name) = content.split_once("|").unwrap_or((content, ""));
+        // Forgejo API returns content as JSON array '["id","name"]' in newer versions,
+        // or as 'id|name' in older versions. Handle both.
+        let issue_id = if content.starts_with('[') {
+            serde_json::from_str::<Vec<String>>(content)
+                .ok()
+                .and_then(|v| v.into_iter().next())
+                .unwrap_or_else(|| content.to_string())
+        } else {
+            content.split_once("|").map_or(content, |(id, _)| id).to_string()
+        };
         Ok((full_name, issue_id))
     }
 
