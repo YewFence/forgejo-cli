@@ -130,6 +130,7 @@ fj issue edit <id> assignees                Edit assignees (--add, --rm)
 fj issue edit <id> comment <n>              Edit comment
 fj issue comment <id> [body]                Comment (--body-file)
 fj issue close <id>                         Close (-w [msg] optional closing comment)
+fj issue reopen <id>                        Reopen (-w [msg] optional comment)
 fj issue browse <id>                        Open in browser
 fj issue templates                          List templates
 ```
@@ -152,8 +153,11 @@ fj pr status [id]                           CI/merge status (--wait to block)
 fj pr edit [id] title                       Edit title
 fj pr edit [id] body                        Edit body
 fj pr edit [id] labels                      Edit labels (--add, --rm)
+fj pr edit [id] assignees                   Edit assignees (--add, --rm)
+fj pr edit [id] comment <n>                 Edit comment
 fj pr comment [id] [body]                   Comment (--body-file)
 fj pr close [id]                            Close without merge (-w [msg] optional comment)
+fj pr reopen [id]                           Reopen (-w [msg] optional comment)
 fj pr merge [id]                            Merge (-M method, --delete branch, -t title, -m message)
 fj pr browse [id]                           Open in browser
 ```

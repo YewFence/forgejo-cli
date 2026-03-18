@@ -96,7 +96,9 @@ fj --json pr view 10
 fj pr view 10 diff                          # View diff
 fj pr view 10 files                         # Changed files
 fj pr view 10 commits                       # Commit list
+fj pr view 10 labels                        # List labels
 fj pr view 10 comments                      # All comments
+fj pr view 10 comment 3                     # Specific comment
 
 # CI Status
 fj --json pr status 10
@@ -104,7 +106,10 @@ fj pr status 10 --wait                      # Block until CI finishes
 
 # Edit
 fj pr edit 10 title "New title"
+fj pr edit 10 body "Updated description"
 fj pr edit 10 labels -a approved -r draft
+fj pr edit 10 assignees -a user1 -r user2
+fj pr edit 10 comment 3                     # Edit specific comment
 
 # Merge
 fj --yes pr merge 10 -M merge --delete      # Merge + delete branch
