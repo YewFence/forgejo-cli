@@ -32,7 +32,9 @@ Destructive commands also accept:
 ```bash
 fj auth login                    # OAuth browser flow
 fj auth add-key <user> <token>   # Direct token (stdin if omitted)
+fj auth logout <host>            # Log out from instance
 fj auth list                     # Show logged-in instances
+fj auth use-ssh [true|false]     # Toggle SSH as default for current instance
 fj whoami                        # Current user@instance
 ```
 
@@ -69,6 +71,12 @@ fj --yes issue reopen 42
 # Comment
 fj issue comment 42 "Comment body"
 fj issue comment 42 --body-file notes.md
+
+# Templates
+fj issue templates -r owner/repo             # List available issue templates
+
+# Browse
+fj issue browse 42                           # Open in browser
 ```
 
 ### Pull Requests
@@ -103,11 +111,22 @@ fj --yes pr merge 10 -M merge --delete      # Merge + delete branch
 fj --yes pr merge 10 -M squash
 fj --yes pr merge 10 -M rebase
 
+# State
+fj --yes pr close 10
+fj --yes pr close 10 -w "Superseded by #11"  # Close with comment
+fj --yes pr reopen 10
+fj --yes pr reopen 10 -w "Reopening per review"
+
 # Comment
 fj pr comment 10 "LGTM"
+fj pr comment 10 --body-file review.md
 
 # Checkout locally
 fj pr checkout 10
+fj pr checkout 10 --branch-name my-branch    # Custom local branch name
+
+# Browse
+fj pr browse 10                              # Open in browser
 ```
 
 ### Repositories
@@ -115,16 +134,23 @@ fj pr checkout 10
 ```bash
 fj repo create myrepo -d "Description" -p   # Private
 fj repo fork owner/repo --name my-fork
+fj repo migrate https://github.com/user/repo myrepo  # Mirror from other forges
+fj repo migrate https://github.com/user/repo myrepo -m  # As mirror (auto-sync)
 fj --json repo view                          # Current repo info
 fj repo readme                               # View README
 fj repo browse                               # Open in browser
 fj repo clone owner/repo
+fj repo clone owner/repo -S                  # Clone via SSH
 fj --yes repo star
+fj --yes repo unstar
 fj --yes repo delete owner/repo --force      # Destructive
 
 # Labels
 fj --json repo labels view
+fj repo labels view --archived               # Include archived labels
 fj repo labels create "bug" "#d73a4a" -d "Something isn't working"
+fj repo labels create "scope/api" "#0e8a16" -e  # Exclusive (scoped) label
+fj repo labels edit 5 -n "renamed" -c "#ff0000"
 fj repo labels delete 5 --force
 ```
 
@@ -137,13 +163,16 @@ fj --json release view v1.0.0
 fj release create v1.0.0 -T v1.0.0 -b "Release notes" --attach dist/app.tar.gz
 fj release edit v1.0.0 --body "Updated notes"
 fj --yes release delete v1.0.0 --force
+fj release browse v1.0.0                    # Open in browser
 
 # Attachments
 fj release asset create v1.0.0 ./binary
 fj release asset download v1.0.0 binary -o ./downloaded
+fj --yes release asset delete v1.0.0 binary --force
 
 # Tags
 fj --json tag list
+fj --json tag view v1.0.0
 fj tag create v1.0.0 -B main
 fj --yes tag delete v1.0.0 --force
 ```
@@ -163,21 +192,38 @@ fj --yes milestone delete "Sprint 1" --force
 
 ```bash
 fj --json org list
+fj --json org list -m                        # Only orgs you belong to
 fj --json org view myorg
 fj org create myorg -d "Description" -v public
+fj org edit myorg -d "Updated description"
 fj --json org members myorg
 fj org activity myorg
+fj org visibility myorg                      # View membership visibility
+fj org visibility myorg -s public            # Set membership visibility
+
+# Org repos
+fj --json org repo list myorg
+fj org repo create myorg newrepo -d "Description"
 
 # Teams
 fj --json org team list myorg
+fj --json org team view myorg devs
+fj org team view myorg devs -p               # Show permissions
 fj org team create myorg devs -d "Developers" -w code,issue
+fj org team edit myorg devs --new-name "developers" -d "Updated"
+fj org team member list myorg devs
 fj org team member add myorg devs username
+fj --yes org team member rm myorg devs username --force
+fj org team repo list myorg devs
 fj org team repo add myorg devs reponame
+fj --yes org team repo rm myorg devs reponame --force
 fj --yes org team delete myorg devs --force
 
 # Org labels
 fj --json org label list myorg
-fj org label add myorg "priority" "#ff0000"
+fj org label add myorg "priority" "#ff0000" -d "High priority" -e
+fj org label edit myorg "priority" --new-name "urgent" -c "#cc0000"
+fj --yes org label rm myorg "priority" --force
 ```
 
 ### Users
@@ -185,23 +231,44 @@ fj org label add myorg "priority" "#ff0000"
 ```bash
 fj --json user view                          # Self
 fj --json user view someuser
-fj --json user repos --starred
+fj --json user repos                         # Own repos
+fj --json user repos --starred               # Starred repos
+fj --json user repos someuser                # Another user's repos
 fj --json user search "query"
+fj --json user orgs                          # Own org memberships
+fj --json user following                     # Who you follow
+fj --json user followers                     # Who follows you
 fj --yes user follow someuser
+fj --yes user unfollow someuser
+fj --yes user block someuser
+fj --yes user unblock someuser
 fj user activity someuser
+fj user browse someuser                      # Open profile in browser
 
 # Profile editing
 fj user edit bio "I write code"
 fj user edit name "Display Name"
+fj user edit name -u                         # Unset display name
+fj user edit pronouns "they/them"
+fj user edit location "Earth"
+fj user edit website "https://example.com"
+fj user edit activity -v public              # Set activity visibility
+fj user edit email -a new@example.com -r old@example.com
 
 # SSH keys
 fj --json user key list
-fj user key upload ~/.ssh/id_ed25519.pub
+fj user key list -v                          # Verbose (detailed info)
+fj --json user key view 42
+fj user key upload ~/.ssh/id_ed25519.pub -t "My key"
+fj user key upload ~/.ssh/id_ed25519.pub -r  # Read-only deploy key
 fj --yes user key delete 42 --force
 
 # GPG keys
 fj --json user gpg list
+fj --json user gpg view 42
 fj user gpg upload "$(cat key.asc)"
+fj user gpg verify 42
+fj --yes user gpg delete 42 --force
 ```
 
 ### CI/CD Actions
@@ -226,13 +293,17 @@ fj --yes actions secrets delete MY_SECRET --force
 
 ```bash
 fj wiki contents                             # List pages
-fj wiki view "Home"                          # View page
+fj wiki view "Home"                          # View page (rendered markdown)
 fj wiki clone                                # Clone wiki repo
+fj wiki clone -S                             # Clone via SSH
+fj wiki browse "Home"                        # Open page in browser
 ```
 
-### Shell Completions
+### Other
 
 ```bash
+fj version                                   # Show version
+fj version -v                                # Verbose build info
 fj completion bash > ~/.bash_completion.d/fj
 fj completion zsh > ~/.zfunc/_fj
 fj completion fish > ~/.config/fish/completions/fj.fish
