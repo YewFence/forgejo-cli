@@ -1,5 +1,5 @@
 [package]
-name = "forgejo-cli"
+name = "forgejo-cli-plus"
 version = "1.0.0"
 edition = "2021"
 license = "Apache-2.0 OR MIT"
@@ -11,10 +11,27 @@ categories = ["command-line-utilities", "development-tools"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [package.metadata.binstall]
-pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ target-family }{ archive-suffix }"
+pkg-fmt = "tgz"
 bin-dir = "{ bin }{ binary-ext }"
 
+[package.metadata.binstall.overrides.x86_64-unknown-linux-gnu]
+pkg-url = "{ repo }/releases/download/v{ version }/forgejo-cli-plus-linux-x86_64.tar.gz"
+
+[package.metadata.binstall.overrides.x86_64-unknown-linux-musl]
+pkg-url = "{ repo }/releases/download/v{ version }/forgejo-cli-plus-linux-x86_64.tar.gz"
+
+[package.metadata.binstall.overrides.x86_64-apple-darwin]
+pkg-url = "{ repo }/releases/download/v{ version }/forgejo-cli-plus-macos-x86_64.tar.gz"
+
+[package.metadata.binstall.overrides.aarch64-apple-darwin]
+pkg-url = "{ repo }/releases/download/v{ version }/forgejo-cli-plus-macos-aarch64.tar.gz"
+
 [package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-url = "{ repo }/releases/download/v{ version }/forgejo-cli-plus-windows-x86_64.zip"
+pkg-fmt = "zip"
+
+[package.metadata.binstall.overrides.x86_64-pc-windows-gnu]
+pkg-url = "{ repo }/releases/download/v{ version }/forgejo-cli-plus-windows-x86_64.zip"
 pkg-fmt = "zip"
 
 [[bin]]
@@ -35,9 +52,9 @@ comrak = { version = "0.51.0", default-features = false }
 crossterm = "0.29.0"
 directories = "6.0.0"
 eyre = "0.6.12"
-forgejo-api = "0.9.0"
+forgejo-api = { version = "0.9.0", default-features = false, features = ["rustls-tls"] }
 futures = "0.3.31"
-git2 = "0.20.1"
+git2 = { version = "0.20.1", features = ["vendored-libgit2"] }
 hyper = "1.6.0"
 hyper-util = { version = "0.1.11", features = ["tokio", "server", "http1", "http2"] }
 open = "5.3.2"
@@ -56,6 +73,6 @@ url = "2.5.4"
 uuid = { version = "1.16.0", features = ["v4"] }
 
 [build-dependencies]
-git2 = "0.20.1"
+git2 = { version = "0.20.1", features = ["vendored-libgit2"] }
 uuid = "1.16.0"
 

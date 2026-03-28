@@ -18,16 +18,17 @@
       rec {
         packages.forgejo-cli = pkgs.rustPlatform.buildRustPackage {
           pname = "forgejo-cli";
-          version = "0.4.0";
+          version = "1.0.0";
           src = pkgs.lib.cleanSource ./.;
 
           cargoLock.lockFile = ./Cargo.lock;
 
           nativeBuildInputs = with pkgs; [
             pkg-config
+            cmake
             installShellFiles
           ];
-          buildInputs = with pkgs; [ openssl ];
+          buildInputs = [ ];
 
           postInstall = ''
             export HOME=$(mktemp -d)
@@ -40,7 +41,7 @@
 
           meta = with pkgs.lib; {
             description = "CLI tool for Forgejo";
-            homepage = "https://codeberg.org/forgejo-contrib/forgejo-cli/";
+            homepage = "https://codeberg.org/stalecontext/forgejo-cli-plus";
             license = with licenses; [
               asl20 # or
               mit
