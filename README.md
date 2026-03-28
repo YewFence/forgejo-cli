@@ -348,25 +348,80 @@ fj completion bash > ~/.local/share/bash-completion/completions/fj
 
 ## Install
 
-**Pre-built binaries** -- grab from the [releases page](https://codeberg.org/stalecontext/forgejo-cli-plus/releases/latest) (x86_64 Windows + Linux).
+### Quick install (Linux / macOS)
 
-**Cargo:**
+```sh
+curl -fsSL https://codeberg.org/stalecontext/forgejo-cli-plus/raw/branch/main/install.sh | sh
+```
+
+Set `INSTALL_DIR` to change the install location (default: `/usr/local/bin`).
+
+### Homebrew (macOS / Linux)
+
+```sh
+brew tap stalecontext/forgejo-cli-plus https://codeberg.org/stalecontext/homebrew-forgejo-cli-plus.git
+brew install forgejo-cli-plus
+```
+
+### Pre-built binaries
+
+Grab the right archive from the [latest release](https://codeberg.org/stalecontext/forgejo-cli-plus/releases/latest):
+
+| Platform | Archive |
+|---|---|
+| Linux x86_64 | `forgejo-cli-plus-linux-x86_64.tar.gz` |
+| macOS x86_64 (Intel) | `forgejo-cli-plus-macos-x86_64.tar.gz` |
+| macOS aarch64 (Apple Silicon) | `forgejo-cli-plus-macos-aarch64.tar.gz` |
+| Windows x86_64 | `forgejo-cli-plus-windows-x86_64.zip` |
+
+Extract and put `fj` (or `fj.exe`) somewhere on your `PATH`.
+
+### Cargo
+
+```sh
+cargo install forgejo-cli-plus
+```
+
+Or install from git for the latest unreleased changes:
+
 ```sh
 cargo install --git https://codeberg.org/stalecontext/forgejo-cli-plus.git
 ```
 
-**Nix:**
+### Nix
+
 ```sh
 nix run codeberg:stalecontext/forgejo-cli-plus
 ```
 
-**From source:**
+### Build from source
+
 ```sh
 git clone https://codeberg.org/stalecontext/forgejo-cli-plus.git
 cd forgejo-cli-plus
 cargo build --release
 # binary: target/release/fj
 ```
+
+### Replacing upstream forgejo-cli
+
+If you previously installed the upstream `forgejo-cli`, uninstall it first to avoid conflicts (both install a binary named `fj`):
+
+```sh
+# If installed via cargo
+cargo uninstall forgejo-cli
+
+# If installed via Homebrew
+brew uninstall forgejo-cli
+
+# If installed via Nix
+nix profile remove forgejo-cli
+
+# If installed from a pre-built binary
+rm "$(which fj)"
+```
+
+Then install forgejo-cli-plus using any method above.
 
 ---
 
