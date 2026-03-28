@@ -1,5 +1,12 @@
 <h1 align="center"><img src="logo.png" alt="" width="128"><br>Forgejo CLI <b><i>Plus</i></b></h1>
 
+<p align="center">
+  <a href="LICENSE-APACHE"><img src="https://img.shields.io/badge/license-Apache--2.0%20%2F%20MIT-blue" alt="License"></a>
+  <img src="https://img.shields.io/badge/lang-Rust-F74C00?logo=rust&logoColor=white" alt="Rust">
+  <img src="https://img.shields.io/badge/Forgejo-compatible-478061?logo=forgejo&logoColor=white" alt="Forgejo">
+  <a href="https://codeberg.org/stalecontext/forgejo-cli-plus/releases/latest"><img src="https://img.shields.io/badge/download-latest%20release-brightgreen" alt="Latest Release"></a>
+</p>
+
 > Like `gh` for GitHub, but for [Forgejo](https://forgejo.org).
 
 A community-maintained fork of [`forgejo-cli`](https://codeberg.org/forgejo-contrib/forgejo-cli).
@@ -22,6 +29,9 @@ Works alongside `git` to handle the Forgejo-specific stuff: issues, PRs, milesto
 | **Automation** | `--json` output, `--yes` auto-confirm, `--verbose` diagnostics, `--force` / `--dry-run` on destructive ops |
 
 ### What's different from [upstream](https://codeberg.org/forgejo-contrib/forgejo-cli)?
+
+> [!IMPORTANT]
+> This fork adds features and fixes on top of the original. It's a drop-in replacement -- same binary name (`fj`), same config.
 
 **New features:**
 - Milestone management -- list, view, create, edit, delete
@@ -103,7 +113,8 @@ cargo build --release
 
 ### Replacing upstream forgejo-cli
 
-If you previously installed the upstream `forgejo-cli`, uninstall it first to avoid conflicts (both install a binary named `fj`):
+> [!WARNING]
+> If you previously installed the upstream `forgejo-cli`, uninstall it first to avoid conflicts -- both install a binary named `fj`.
 
 ```sh
 # If installed via cargo
@@ -125,14 +136,17 @@ Then install forgejo-cli-plus using any method above.
 
 ## Getting started
 
+> [!TIP]
+> Create a token at `https://<your-instance>/user/settings/applications`, then add it with the command below. Use `-H` if you're not inside a repo that points to your instance.
+
 ```sh
-# 1. Create a token at https://<your-instance>/user/settings/applications
-# 2. Add it (use -H if you're not inside a repo that points to your instance):
 fj -H codeberg.org auth add-key <your-username>
 # paste the token when prompted
 
 fj whoami                                    # verify it worked
+```
 
+```sh
 # Then use it from any repo with a Forgejo remote
 fj repo clone owner/repo                     # clone something
 fj issue create "title goes here"            # file an issue
@@ -141,18 +155,22 @@ fj pr status --wait                          # watch CI
 fj pr merge 42                               # merge it
 ```
 
-`fj` figures out which Forgejo instance to talk to from your git remotes.
-If you're not in a repo, use `-H <host>` or set `FJ_FALLBACK_HOST`.
-
-Output is colorized in terminals, plain when piped. Force plain with `--style minimal`.
+> [!NOTE]
+> `fj` figures out which Forgejo instance to talk to from your git remotes. If you're not in a repo, use `-H <host>` or set `FJ_FALLBACK_HOST`.
+>
+> Output is colorized in terminals, plain when piped. Force plain with `--style minimal`.
 
 ### Automation / scripting
 
-Every command supports `--json` for machine-readable output. Use the global flags to skip prompts and get diagnostics:
+> [!TIP]
+> Every command supports `--json` for machine-readable output. Combine with `--yes` and `--verbose` for fully non-interactive scripting.
 
 ```sh
 fj --yes --json issue list                   # JSON output, no prompts
 fj --verbose issue view 42                   # print API calls to stderr
+```
+
+```sh
 fj repo delete owner/repo --dry-run          # preview without executing
 fj --yes repo delete owner/repo --force      # non-interactive delete
 ```
