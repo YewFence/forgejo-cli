@@ -1,7 +1,7 @@
 use std::{io::Write, path::PathBuf, str::FromStr};
 
 use clap::{Args, Subcommand};
-use eyre::{eyre, Context, OptionExt, Result};
+use eyre::{eyre, OptionExt, Result};
 use forgejo_api::{structs::CreateRepoOption, Forgejo};
 use ssh2_config::ParseRule;
 use url::Url;
@@ -174,9 +174,7 @@ impl RepoInfo {
             (repo_url, repo_name)
         } else if repo_name.is_some() {
             (host_url.or(remote_url), repo_name)
-        } else if remote.is_some() {
-            (remote_url, remote_repo_name)
-        } else if host_url.is_none() || same_instance(&remote_url, &host_url) {
+        } else if remote.is_some() || host_url.is_none() || same_instance(&remote_url, &host_url) {
             (remote_url, remote_repo_name)
         } else {
             (host_url, None)
@@ -489,9 +487,9 @@ impl RepoCommand {
                         ssh,
                     },
             } => {
-                let host = RepoInfo::get_current(host_name, None, None, &keys)?;
+                let host = RepoInfo::get_current(host_name, None, None, keys)?;
                 let api = keys.get_api(host.host_url()).await?;
-                let url_host = crate::host_name(&host.host_url());
+                let url_host = crate::host_name(host.host_url());
                 let ssh = ssh
                     .unwrap_or_else(|| Some(keys.default_ssh.contains(url_host)))
                     .unwrap_or(true);
@@ -524,8 +522,17 @@ impl RepoCommand {
                     None => (None, repo),
                 };
 
-                create_repo(&api, org, repo_name, description, private, remote, push, ssh)
-                    .await?;
+                create_repo(
+                    &api,
+                    org,
+                    repo_name,
+                    description,
+                    private,
+                    remote,
+                    push,
+                    ssh,
+                )
+                .await?;
             }
             RepoCommand::Fork { repo, name, remote } => {
                 fn strip(s: &str) -> &str {
@@ -543,7 +550,7 @@ impl RepoCommand {
                 }
 
                 let repo_info =
-                    RepoInfo::get_current(host_name, Some(&repo), remote.as_deref(), &keys)?;
+                    RepoInfo::get_current(host_name, Some(&repo), remote.as_deref(), keys)?;
                 let api = keys.get_api(repo_info.host_url()).await?;
                 let repo = repo_info
                     .name()
@@ -561,7 +568,7 @@ impl RepoCommand {
                 token,
                 login,
             } => {
-                let current_repo = RepoInfo::get_current(host_name, None, None, &keys)?;
+                let current_repo = RepoInfo::get_current(host_name, None, None, keys)?;
                 let api = keys.get_api(current_repo.host_url()).await?;
                 migrate_repo(
                     &api,
@@ -579,7 +586,7 @@ impl RepoCommand {
             }
             RepoCommand::View { name, remote } => {
                 let repo =
-                    RepoInfo::get_current(host_name, name.as_ref(), remote.as_deref(), &keys)?;
+                    RepoInfo::get_current(host_name, name.as_ref(), remote.as_deref(), keys)?;
                 let api = keys.get_api(repo.host_url()).await?;
                 let repo = repo
                     .name()
@@ -588,7 +595,7 @@ impl RepoCommand {
             }
             RepoCommand::Readme { name, remote } => {
                 let repo =
-                    RepoInfo::get_current(host_name, name.as_ref(), remote.as_deref(), &keys)?;
+                    RepoInfo::get_current(host_name, name.as_ref(), remote.as_deref(), keys)?;
                 let api = keys.get_api(repo.host_url()).await?;
                 let repo = repo
                     .name()
@@ -601,10 +608,10 @@ impl RepoCommand {
                 ssh,
                 identity_file: identity,
             } => {
-                let repo = RepoInfo::get_current(host_name, Some(&repo), None, &keys)?;
+                let repo = RepoInfo::get_current(host_name, Some(&repo), None, keys)?;
                 let api = keys.get_api(repo.host_url()).await?;
                 let name = repo.name().unwrap();
-                let url_host = crate::host_name(&repo.host_url());
+                let url_host = crate::host_name(repo.host_url());
                 let ssh = ssh
                     .unwrap_or_else(|| Some(keys.default_ssh.contains(url_host)))
                     .unwrap_or(true);
@@ -612,7 +619,7 @@ impl RepoCommand {
             }
             RepoCommand::Star { repo, remote } => {
                 let repo =
-                    RepoInfo::get_current(host_name, repo.as_ref(), remote.as_deref(), &keys)?;
+                    RepoInfo::get_current(host_name, repo.as_ref(), remote.as_deref(), keys)?;
                 let api = keys.get_api(repo.host_url()).await?;
                 let name = repo
                     .name()
@@ -622,24 +629,32 @@ impl RepoCommand {
             }
             RepoCommand::Unstar { repo, remote } => {
                 let repo =
-                    RepoInfo::get_current(host_name, repo.as_ref(), remote.as_deref(), &keys)?;
+                    RepoInfo::get_current(host_name, repo.as_ref(), remote.as_deref(), keys)?;
                 let api = keys.get_api(repo.host_url()).await?;
                 let name = repo
                     .name()
                     .ok_or_eyre("couldn't get repo name, please specify")?;
                 api.user_current_delete_star(name.owner(), name.name())
                     .await?;
-                crate::output::success(&format!("Removed star from {}/{}", name.owner(), name.name()));
+                crate::output::success(&format!(
+                    "Removed star from {}/{}",
+                    name.owner(),
+                    name.name()
+                ));
             }
-            RepoCommand::Delete { repo, force, dry_run } => {
-                let repo = RepoInfo::get_current(host_name, Some(&repo), None, &keys)?;
+            RepoCommand::Delete {
+                repo,
+                force,
+                dry_run,
+            } => {
+                let repo = RepoInfo::get_current(host_name, Some(&repo), None, keys)?;
                 let api = keys.get_api(repo.host_url()).await?;
                 let name = repo.name().unwrap();
                 delete_repo(&api, name, force, dry_run).await?;
             }
             RepoCommand::Browse { name, remote } => {
                 let repo =
-                    RepoInfo::get_current(host_name, name.as_ref(), remote.as_deref(), &keys)?;
+                    RepoInfo::get_current(host_name, name.as_ref(), remote.as_deref(), keys)?;
                 let mut url = repo.host_url().clone();
                 let repo = repo
                     .name()
@@ -648,18 +663,18 @@ impl RepoCommand {
                     .map_err(|_| eyre!("url invalid"))?
                     .extend([repo.owner(), repo.name()]);
 
-                open::that_detached(url.as_str()).wrap_err("Failed to open URL")?;
+                crate::open_url(url.as_str())?;
             }
             RepoCommand::Labels {
                 repo,
                 cmd: LabelsSubcommand::View { archived },
             } => {
-                let repo = RepoInfo::get_current(host_name, repo.as_ref(), None, &keys)?;
+                let repo = RepoInfo::get_current(host_name, repo.as_ref(), None, keys)?;
                 let api = keys.get_api(repo.host_url()).await?;
                 let repo = repo
                     .name()
                     .ok_or_eyre("couldn't get repo name, please specify")?;
-                list_repo_labels(&api, &repo, archived).await?;
+                list_repo_labels(&api, repo, archived).await?;
             }
             RepoCommand::Labels {
                 repo,
@@ -672,25 +687,25 @@ impl RepoCommand {
                         archived,
                     },
             } => {
-                let repo = RepoInfo::get_current(host_name, repo.as_ref(), None, &keys)?;
+                let repo = RepoInfo::get_current(host_name, repo.as_ref(), None, keys)?;
                 let api = keys.get_api(repo.host_url()).await?;
                 let repo = repo
                     .name()
                     .ok_or_eyre("couldn't get repo name, please specify")?;
-                create_repo_label(&api, &repo, name, color, description, exclusive, archived)
+                create_repo_label(&api, repo, name, color, description, exclusive, archived)
                     .await?;
             }
             RepoCommand::Labels {
                 repo,
                 cmd: LabelsSubcommand::Delete { id, force, dry_run },
             } => {
-                let repo = RepoInfo::get_current(host_name, repo.as_ref(), None, &keys)?;
+                let repo = RepoInfo::get_current(host_name, repo.as_ref(), None, keys)?;
                 let api = keys.get_api(repo.host_url()).await?;
                 let repo = repo
                     .name()
                     .ok_or_eyre("couldn't get repo name, please specify")?;
 
-                delete_repo_label(&api, &repo, id, force, dry_run).await?;
+                delete_repo_label(&api, repo, id, force, dry_run).await?;
             }
             RepoCommand::Labels {
                 repo,
@@ -704,7 +719,7 @@ impl RepoCommand {
                         archived,
                     },
             } => {
-                let repo = RepoInfo::get_current(host_name, repo.as_ref(), None, &keys)?;
+                let repo = RepoInfo::get_current(host_name, repo.as_ref(), None, keys)?;
                 let api = keys.get_api(repo.host_url()).await?;
                 let repo = repo
                     .name()
@@ -712,7 +727,7 @@ impl RepoCommand {
 
                 edit_repo_label(
                     &api,
-                    &repo,
+                    repo,
                     id,
                     name,
                     color,
@@ -796,6 +811,7 @@ pub enum LabelsSubcommand {
     },
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn create_repo(
     api: &Forgejo,
     org: Option<String>,
@@ -1014,6 +1030,7 @@ impl std::fmt::Display for MigrateIncludeParseError {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn migrate_repo(
     api: &Forgejo,
     mut repo: String,
@@ -1204,6 +1221,7 @@ async fn view_repo(api: &Forgejo, repo: &RepoName) -> eyre::Result<()> {
 }
 
 async fn view_repo_readme(api: &Forgejo, repo: &RepoName) -> eyre::Result<()> {
+    #[allow(clippy::type_complexity)]
     let candidates: &[(&str, fn(&str) -> String)] = &[
         ("README.md", crate::markdown),
         ("readme.md", crate::markdown),
@@ -1253,7 +1271,7 @@ async fn cmd_clone_repo(
     let local_repo = clone_repo(repo_full_name, clone_url, &path, identity_file.as_deref())?;
 
     if let Some(parent) = repo_data.parent.as_deref() {
-        local_repo.remote("upstream", git_url(&parent, ssh)?.as_str())?;
+        local_repo.remote("upstream", git_url(parent, ssh)?.as_str())?;
     }
 
     Ok(())
@@ -1372,20 +1390,28 @@ async fn delete_repo(
     dry_run: bool,
 ) -> eyre::Result<()> {
     if dry_run {
-        crate::output::dry_run(&format!("delete repository {}/{}", name.owner(), name.name()));
+        crate::output::dry_run(&format!(
+            "delete repository {}/{}",
+            name.owner(),
+            name.name()
+        ));
         return Ok(());
     }
 
-    if !force && !crate::yes_mode() {
-        if !crate::prompt_bool(
-            &format!("Delete repository {}/{}? This cannot be undone!", name.owner(), name.name()),
+    if !force
+        && !crate::yes_mode()
+        && !crate::prompt_bool(
+            &format!(
+                "Delete repository {}/{}? This cannot be undone!",
+                name.owner(),
+                name.name()
+            ),
             false,
         )
         .await?
-        {
-            crate::output::info("Not deleted");
-            return Ok(());
-        }
+    {
+        crate::output::info("Not deleted");
+        return Ok(());
     }
 
     crate::verbose_log!("Deleting repository {}/{}", name.owner(), name.name());
@@ -1448,10 +1474,7 @@ async fn create_repo_label(
         )
         .await?;
 
-    crate::output::success(&format!(
-        "Created label {}",
-        crate::render_label(&label)?,
-    ));
+    crate::output::success(&format!("Created label {}", crate::render_label(&label)?,));
     Ok(())
 }
 
@@ -1471,11 +1494,12 @@ async fn delete_repo_label(
         return Ok(());
     }
 
-    if !force && !crate::yes_mode() {
-        if !crate::prompt_bool(&format!("Delete label '{name}'?"), false).await? {
-            crate::output::info("Not deleted");
-            return Ok(());
-        }
+    if !force
+        && !crate::yes_mode()
+        && !crate::prompt_bool(&format!("Delete label '{name}'?"), false).await?
+    {
+        crate::output::info("Not deleted");
+        return Ok(());
     }
 
     crate::verbose_log!("Deleting label {name} on {}/{}", repo.owner(), repo.name());
@@ -1486,6 +1510,7 @@ async fn delete_repo_label(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn edit_repo_label(
     api: &Forgejo,
     repo: &RepoName,
@@ -1541,9 +1566,144 @@ async fn find_user_label(api: &Forgejo, repo: &RepoName, id: &str) -> eyre::Resu
         .issue_list_labels(repo.owner(), repo.name(), Default::default())
         .await?;
 
-    return labels
+    labels
         .iter()
         .find(|l| l.name.as_ref().map(|n| n == id).unwrap_or_default())
         .and_then(|l| l.id)
-        .ok_or_eyre("No label found with the given name.");
+        .ok_or_eyre("No label found with the given name.")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::str::FromStr;
+
+    #[test]
+    fn repo_arg_owner_name() {
+        let arg = RepoArg::from_str("alice/my-repo").unwrap();
+        assert_eq!(arg.owner, "alice");
+        assert_eq!(arg.name, "my-repo");
+        assert!(arg.host.is_none());
+    }
+
+    #[test]
+    fn repo_arg_with_host() {
+        let arg = RepoArg::from_str("codeberg.org/alice/my-repo").unwrap();
+        assert_eq!(arg.host.as_deref(), Some("codeberg.org"));
+        assert_eq!(arg.owner, "alice");
+        assert_eq!(arg.name, "my-repo");
+    }
+
+    #[test]
+    fn repo_arg_strips_git_suffix() {
+        let arg = RepoArg::from_str("alice/my-repo.git").unwrap();
+        assert_eq!(arg.name, "my-repo");
+    }
+
+    #[test]
+    fn repo_arg_host_with_git_suffix() {
+        let arg = RepoArg::from_str("codeberg.org/alice/my-repo.git").unwrap();
+        assert_eq!(arg.host.as_deref(), Some("codeberg.org"));
+        assert_eq!(arg.owner, "alice");
+        assert_eq!(arg.name, "my-repo");
+    }
+
+    #[test]
+    fn repo_arg_no_slash_is_error() {
+        let err = RepoArg::from_str("just-a-name").unwrap_err();
+        assert_eq!(err, RepoArgError::NoOwner);
+    }
+
+    #[test]
+    fn repo_arg_display_without_host() {
+        let arg = RepoArg::from_str("alice/my-repo").unwrap();
+        assert_eq!(arg.to_string(), "alice/my-repo");
+    }
+
+    #[test]
+    fn repo_arg_display_with_host() {
+        let arg = RepoArg::from_str("codeberg.org/alice/my-repo").unwrap();
+        assert_eq!(arg.to_string(), "codeberg.org/alice/my-repo");
+    }
+
+    #[test]
+    fn repo_arg_host_with_scheme_and_subpath() {
+        // rsplit_once means everything before the last two segments is "host"
+        let arg = RepoArg::from_str("https://git.example.com/alice/repo").unwrap();
+        assert_eq!(arg.host.as_deref(), Some("https://git.example.com"));
+        assert_eq!(arg.owner, "alice");
+        assert_eq!(arg.name, "repo");
+    }
+
+    #[test]
+    fn url_strip_extracts_owner_and_name() {
+        let url = url::Url::parse("https://codeberg.org/alice/my-repo").unwrap();
+        let (base, repo_name) = url_strip_repo_name(url).unwrap();
+        assert_eq!(repo_name.owner(), "alice");
+        assert_eq!(repo_name.name(), "my-repo");
+        assert_eq!(base.as_str(), "https://codeberg.org/");
+    }
+
+    #[test]
+    fn url_strip_handles_git_suffix() {
+        let url = url::Url::parse("https://codeberg.org/alice/my-repo.git").unwrap();
+        let (_, repo_name) = url_strip_repo_name(url).unwrap();
+        assert_eq!(repo_name.name(), "my-repo");
+    }
+
+    #[test]
+    fn url_strip_with_subpath() {
+        let url = url::Url::parse("https://example.com/forge/alice/repo").unwrap();
+        let (base, repo_name) = url_strip_repo_name(url).unwrap();
+        assert_eq!(repo_name.owner(), "alice");
+        assert_eq!(repo_name.name(), "repo");
+        // Url::path_segments_mut().pop().pop() removes trailing slash
+        assert_eq!(base.as_str(), "https://example.com/forge");
+    }
+
+    #[test]
+    fn migrate_include_all_enables_everything() {
+        let inc = MigrateInclude::from_str("all").unwrap();
+        assert!(inc.lfs);
+        assert!(inc.wiki);
+        assert!(inc.issues);
+        assert!(inc.prs);
+        assert!(inc.milestones);
+        assert!(inc.labels);
+        assert!(inc.releases);
+    }
+
+    #[test]
+    fn migrate_include_comma_separated() {
+        let inc = MigrateInclude::from_str("lfs,wiki").unwrap();
+        assert!(inc.lfs);
+        assert!(inc.wiki);
+        assert!(!inc.issues);
+        assert!(!inc.prs);
+    }
+
+    #[test]
+    fn migrate_include_single_token() {
+        let inc = MigrateInclude::from_str("issues").unwrap();
+        assert!(inc.issues);
+        assert!(!inc.lfs);
+        assert!(!inc.wiki);
+    }
+
+    #[test]
+    fn migrate_include_unknown_token_is_error() {
+        assert!(MigrateInclude::from_str("bogus").is_err());
+    }
+
+    #[test]
+    fn migrate_include_non_base_git_lfs_only() {
+        let inc = MigrateInclude::from_str("lfs").unwrap();
+        assert!(!inc.non_base_git());
+    }
+
+    #[test]
+    fn migrate_include_non_base_git_with_wiki() {
+        let inc = MigrateInclude::from_str("wiki").unwrap();
+        assert!(inc.non_base_git());
+    }
 }

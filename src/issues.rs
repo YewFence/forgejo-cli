@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use clap::{Args, Subcommand};
-use eyre::{eyre, Context, OptionExt};
+use eyre::{eyre, OptionExt};
 use forgejo_api::structs::{
     Comment, CreateIssueCommentOption, CreateIssueOption, EditIssueOption, IssueGetCommentsQuery,
 };
@@ -236,7 +236,7 @@ pub enum ViewCommand {
 impl IssueCommand {
     pub async fn run(self, keys: &mut crate::KeyInfo, host_name: Option<&str>) -> eyre::Result<()> {
         use IssueSubcommand::*;
-        let repo = RepoInfo::get_current(host_name, self.repo(), self.remote.as_deref(), &keys)?;
+        let repo = RepoInfo::get_current(host_name, self.repo(), self.remote.as_deref(), keys)?;
         let api = keys.get_api(repo.host_url()).await?;
         let repo = repo.name().ok_or_else(|| self.no_repo_error())?;
         match self.command {
@@ -278,7 +278,12 @@ impl IssueCommand {
                 assignee,
                 state,
                 milestone,
-            } => view_issues(repo, &api, query, labels, creator, assignee, state, milestone).await?,
+            } => {
+                view_issues(
+                    repo, &api, query, labels, creator, assignee, state, milestone,
+                )
+                .await?
+            }
             Templates { .. } => view_issue_templates(repo, &api).await?,
             Edit { issue, command } => match command {
                 EditCommand::Title { new_title } => {
@@ -371,6 +376,7 @@ pub async fn maybe_label_names_to_ids(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn create_issue(
     repo: &RepoName,
     api: &Forgejo,
@@ -411,7 +417,11 @@ async fn create_issue(
                 .blank_issues_enabled
                 .unwrap_or(true);
 
-            let assignees = if assignees.is_empty() { None } else { Some(assignees) };
+            let assignees = if assignees.is_empty() {
+                None
+            } else {
+                Some(assignees)
+            };
 
             let opts = if let Some(template_name) = template {
                 eyre::ensure!(
@@ -496,7 +506,7 @@ async fn create_issue(
                 .path_segments_mut()
                 .expect("invalid url")
                 .extend(["issues", "new"]);
-            open::that_detached(issue_create_url.as_str()).wrap_err("Failed to open URL")?;
+            crate::open_url(issue_create_url.as_str())?;
         }
         (None, false) => {
             eyre::bail!("requires either issue title or --web flag")
@@ -552,9 +562,9 @@ pub async fn view_issue(repo: &RepoName, api: &Forgejo, id: i64) -> eyre::Result
         print!("By {white}{username}{reset} {dash} ");
 
         use forgejo_api::structs::StateType;
-        match state {
-            &StateType::Open => println!("{bright_green}Open{reset}"),
-            &StateType::Closed => println!("{bright_red}Closed{reset}"),
+        match *state {
+            StateType::Open => println!("{bright_green}Open{reset}"),
+            StateType::Closed => println!("{bright_red}Closed{reset}"),
         };
 
         if let Some(ms) = &issue.milestone {
@@ -592,6 +602,7 @@ pub async fn view_issue(repo: &RepoName, api: &Forgejo, id: i64) -> eyre::Result
     })?;
     Ok(())
 }
+#[allow(clippy::too_many_arguments)]
 async fn view_issues(
     repo: &RepoName,
     api: &Forgejo,
@@ -811,7 +822,7 @@ pub async fn browse_issue(repo: &RepoName, api: &Forgejo, id: i64) -> eyre::Resu
         .html_url
         .as_ref()
         .ok_or_else(|| eyre::eyre!("issue does not have html_url"))?;
-    open::that_detached(html_url.as_str()).wrap_err("Failed to open URL")?;
+    crate::open_url(html_url.as_str())?;
     Ok(())
 }
 
@@ -1120,4 +1131,39 @@ pub async fn reopen_issue(
     crate::output::success(&format!("Reopened issue #{issue}"));
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn issue_id_bare_number() {
+        let id: IssueId = "42".parse().unwrap();
+        assert!(id.repo.is_none());
+        assert_eq!(id.number, 42);
+    }
+
+    #[test]
+    fn issue_id_with_repo() {
+        let id: IssueId = "alice/repo#42".parse().unwrap();
+        let repo = id.repo.unwrap();
+        assert_eq!(repo.to_string(), "alice/repo");
+        assert_eq!(id.number, 42);
+    }
+
+    #[test]
+    fn issue_id_non_numeric_string_is_error() {
+        let result = "not-a-number".parse::<IssueId>();
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), IssueIdError::Number(_)));
+    }
+
+    #[test]
+    fn issue_id_missing_owner_is_error() {
+        // "repo#42" has no slash, so RepoArg::from_str fails with NoOwner
+        let result = "repo#42".parse::<IssueId>();
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), IssueIdError::Repo(_)));
+    }
 }

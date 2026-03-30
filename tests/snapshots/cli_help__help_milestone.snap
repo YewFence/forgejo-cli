@@ -1,0 +1,20 @@
+---
+source: tests/cli_help.rs
+expression: stdout
+---
+Usage: fj milestone [OPTIONS] <COMMAND>
+
+Commands:
+  list    List milestones on a repo
+  view    View a milestone's details
+  create  Create a new milestone
+  edit    Edit an existing milestone
+  delete  Delete a milestone
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+  -R, --remote <REMOTE>  The local git remote that points to the repo to operate on
+  -r, --repo <REPO>      The name of the repository to operate on
+  -y, --yes              Skip all confirmation prompts (auto-confirm destructive actions)
+  -v, --verbose          Show verbose output (API calls, resolution steps)
+  -h, --help             Print help

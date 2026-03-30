@@ -1,5 +1,5 @@
 use clap::{Args, Subcommand};
-use eyre::{bail, eyre, Context, OptionExt};
+use eyre::{bail, eyre, OptionExt};
 use forgejo_api::{
     structs::{RepoCreateReleaseAttachmentQuery, RepoListReleasesQuery},
     Forgejo,
@@ -146,7 +146,7 @@ impl ReleaseCommand {
             remote_name,
             self.repo.as_ref(),
             self.remote.as_deref(),
-            &keys,
+            keys,
         )?;
         let api = keys.get_api(repo.host_url()).await?;
         let repo = repo
@@ -176,9 +176,12 @@ impl ReleaseCommand {
                 draft,
                 prerelease,
             } => edit_release(repo, &api, name, rename, tag, body, draft, prerelease).await?,
-            ReleaseSubcommand::Delete { name, by_tag, force, dry_run } => {
-                delete_release(repo, &api, name, by_tag, force, dry_run).await?
-            }
+            ReleaseSubcommand::Delete {
+                name,
+                by_tag,
+                force,
+                dry_run,
+            } => delete_release(repo, &api, name, by_tag, force, dry_run).await?,
             ReleaseSubcommand::List {
                 include_prerelease,
                 include_draft,
@@ -193,9 +196,12 @@ impl ReleaseCommand {
                     path,
                     name,
                 } => create_asset(repo, &api, release, path, name).await?,
-                AssetCommand::Delete { release, asset, force, dry_run } => {
-                    delete_asset(repo, &api, release, asset, force, dry_run).await?
-                }
+                AssetCommand::Delete {
+                    release,
+                    asset,
+                    force,
+                    dry_run,
+                } => delete_asset(repo, &api, release, asset, force, dry_run).await?,
                 AssetCommand::Download {
                     release,
                     asset,
@@ -207,6 +213,7 @@ impl ReleaseCommand {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn create_release(
     repo: &RepoName,
     api: &Forgejo,
@@ -295,6 +302,7 @@ async fn create_release(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn edit_release(
     repo: &RepoName,
     api: &Forgejo,
@@ -350,23 +358,19 @@ async fn list_releases(
     let (_, releases) = api
         .repo_list_releases(repo.owner(), repo.name(), query)
         .await?;
-    crate::output::print_list(
-        &releases,
-        &["NAME", "TAG", "TYPE"],
-        |release| {
-            let name = release.name.as_deref().unwrap_or("?").to_string();
-            let tag = release.tag_name.as_deref().unwrap_or("").to_string();
-            let draft = release.draft.unwrap_or(false);
-            let prerelease = release.prerelease.unwrap_or(false);
-            let type_str = match (draft, prerelease) {
-                (true, true) => "draft, prerelease".to_string(),
-                (true, false) => "draft".to_string(),
-                (false, true) => "prerelease".to_string(),
-                (false, false) => "release".to_string(),
-            };
-            vec![name, tag, type_str]
-        },
-    );
+    crate::output::print_list(&releases, &["NAME", "TAG", "TYPE"], |release| {
+        let name = release.name.as_deref().unwrap_or("?").to_string();
+        let tag = release.tag_name.as_deref().unwrap_or("").to_string();
+        let draft = release.draft.unwrap_or(false);
+        let prerelease = release.prerelease.unwrap_or(false);
+        let type_str = match (draft, prerelease) {
+            (true, true) => "draft, prerelease".to_string(),
+            (true, false) => "draft".to_string(),
+            (false, true) => "prerelease".to_string(),
+            (false, false) => "release".to_string(),
+        };
+        vec![name, tag, type_str]
+    });
     Ok(())
 }
 
@@ -444,7 +448,7 @@ async fn browse_release(repo: &RepoName, api: &Forgejo, name: Option<String>) ->
                 .html_url
                 .as_ref()
                 .ok_or_else(|| eyre::eyre!("release does not have html_url"))?;
-            open::that_detached(html_url.as_str()).wrap_err("Failed to open URL")?;
+            crate::open_url(html_url.as_str())?;
         }
         None => {
             let repo_data = api.repo_get(repo.owner(), repo.name()).await?;
@@ -453,7 +457,7 @@ async fn browse_release(repo: &RepoName, api: &Forgejo, name: Option<String>) ->
                 .clone()
                 .ok_or_else(|| eyre::eyre!("repository does not have html_url"))?;
             html_url.path_segments_mut().unwrap().push("releases");
-            open::that_detached(html_url.as_str()).wrap_err("Failed to open URL")?;
+            crate::open_url(html_url.as_str())?;
         }
     }
     Ok(())
@@ -516,16 +520,16 @@ async fn delete_asset(
         return Ok(());
     }
 
-    if !force && !crate::yes_mode() {
-        if !crate::prompt_bool(
+    if !force
+        && !crate::yes_mode()
+        && !crate::prompt_bool(
             &format!("Delete asset '{asset_name}' from release '{release_name}'?"),
             false,
         )
         .await?
-        {
-            crate::output::info("Not deleted");
-            return Ok(());
-        }
+    {
+        crate::output::info("Not deleted");
+        return Ok(());
     }
 
     crate::verbose_log!(
@@ -550,7 +554,9 @@ async fn delete_asset(
         .ok_or_else(|| eyre::eyre!("asset does not have id"))?;
     api.repo_delete_release_attachment(repo.owner(), repo.name(), release_id, asset_id)
         .await?;
-    crate::output::success(&format!("Removed attachment '{asset_name}' from {release_name}"));
+    crate::output::success(&format!(
+        "Removed attachment '{asset_name}' from {release_name}"
+    ));
     Ok(())
 }
 
@@ -610,7 +616,10 @@ async fn download_asset(
         .await?;
 
     if output.is_some() {
-        crate::output::success(&format!("Downloaded {asset} into {}", real_output.display()));
+        crate::output::success(&format!(
+            "Downloaded {asset} into {}",
+            real_output.display()
+        ));
     } else {
         crate::output::success(&format!("Downloaded {asset}"));
     }
@@ -659,14 +668,19 @@ async fn delete_release(
         return Ok(());
     }
 
-    if !force && !crate::yes_mode() {
-        if !crate::prompt_bool(&format!("Delete release '{name}'?"), false).await? {
-            crate::output::info("Not deleted");
-            return Ok(());
-        }
+    if !force
+        && !crate::yes_mode()
+        && !crate::prompt_bool(&format!("Delete release '{name}'?"), false).await?
+    {
+        crate::output::info("Not deleted");
+        return Ok(());
     }
 
-    crate::verbose_log!("Deleting release {name} on {}/{}", repo.owner(), repo.name());
+    crate::verbose_log!(
+        "Deleting release {name} on {}/{}",
+        repo.owner(),
+        repo.name()
+    );
     if by_tag {
         api.repo_delete_release_by_tag(repo.owner(), repo.name(), &name)
             .await?;

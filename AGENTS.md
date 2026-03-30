@@ -7,7 +7,8 @@ Community-maintained fork of [forgejo-cli](https://codeberg.org/forgejo-contrib/
 ```sh
 cargo build              # debug
 cargo build --release    # binary at target/release/fj
-cargo test               # PKCE S256 tests
+cargo test --all-targets # full suite (93 tests)
+cargo insta review       # review changed snapshots
 ```
 
 Binary name is `fj` (set in Cargo.toml `[[bin]]`).
@@ -79,6 +80,39 @@ crate::verbose_log!("Deleting {name}");
 // ... API call ...
 crate::output::success(&format!("Deleted {name}"));
 ```
+
+## Testing
+
+Run `cargo test --all-targets` before committing. All tests must pass.
+
+**Test structure:**
+- `src/*.rs` -- in-module `#[cfg(test)]` unit tests for pure functions
+- `tests/cli_help.rs` -- `insta` snapshot tests for all `--help` output
+- `tests/cli_errors.rs` -- CLI error handling and exit code tests
+- `tests/api_repo.rs`, `tests/api_tag.rs`, `tests/api_issue.rs` -- wiremock integration tests
+- `tests/dry_run.rs` -- parameterized `--dry-run` test for all 14 destructive commands
+- `tests/common/mod.rs` -- shared `TestInstance` helper (wiremock + assert_cmd)
+
+**When adding a new command:**
+- Add unit tests for any pure parsing/validation functions in the module's `#[cfg(test)]` block
+- Add a `--help` snapshot: add a `#[case("newcommmand")]` line to `tests/cli_help.rs`, run `cargo insta test --accept` to generate it
+- If the command is destructive, add a `#[case]` to `tests/dry_run.rs`
+
+**When adding a destructive command:**
+- Add a `#[case(&["...", "--dry-run"])]` line to `tests/dry_run.rs`
+- Verify the `--dry-run` check is the very first thing in the handler (before any API calls)
+
+**Snapshots:**
+- `cargo insta test` runs tests and shows pending snapshot changes
+- `cargo insta review` interactively accepts/rejects changes
+- `cargo insta test --accept` accepts all changes (use after intentional help text updates)
+- Snapshots normalize `fj.exe` to `fj` for cross-platform portability
+
+**wiremock integration tests:**
+- `TestInstance::start()` creates an isolated mock server + temp data dir
+- `instance.fj()` returns a preconfigured `Command` pointing at the mock server
+- Use `.expect(1)` on mocks to verify API calls are actually made
+- `FJ_DATA_DIR` env var isolates key storage per test to prevent races
 
 ## Upstream sync
 

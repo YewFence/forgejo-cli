@@ -136,9 +136,11 @@ impl ActionsCommand {
                 ActionsVariablesSubcommmand::Create { name, data, force } => {
                     create_variable(repo, &api, name, data, force).await?
                 }
-                ActionsVariablesSubcommmand::Delete { name, force, dry_run } => {
-                    delete_variable(repo, &api, name, force, dry_run).await?
-                }
+                ActionsVariablesSubcommmand::Delete {
+                    name,
+                    force,
+                    dry_run,
+                } => delete_variable(repo, &api, name, force, dry_run).await?,
             },
 
             ActionsSubcommand::Secrets { command } => match command {
@@ -146,9 +148,11 @@ impl ActionsCommand {
                 ActionsSecretsSubcommmand::Create { name, data } => {
                     create_secret(repo, &api, name, data).await?
                 }
-                ActionsSecretsSubcommmand::Delete { name, force, dry_run } => {
-                    delete_secret(repo, &api, name, force, dry_run).await?
-                }
+                ActionsSecretsSubcommmand::Delete {
+                    name,
+                    force,
+                    dry_run,
+                } => delete_secret(repo, &api, name, force, dry_run).await?,
             },
 
             ActionsSubcommand::Dispatch {
@@ -346,14 +350,19 @@ async fn delete_variable(
         return Ok(());
     }
 
-    if !force && !crate::yes_mode() {
-        if !crate::prompt_bool(&format!("Delete variable '{name}'?"), false).await? {
-            crate::output::info("Not deleted");
-            return Ok(());
-        }
+    if !force
+        && !crate::yes_mode()
+        && !crate::prompt_bool(&format!("Delete variable '{name}'?"), false).await?
+    {
+        crate::output::info("Not deleted");
+        return Ok(());
     }
 
-    crate::verbose_log!("Deleting variable {name} on {}/{}", repo.owner(), repo.name());
+    crate::verbose_log!(
+        "Deleting variable {name} on {}/{}",
+        repo.owner(),
+        repo.name()
+    );
     api.delete_repo_variable(repo.owner(), repo.name(), &name)
         .await?;
     crate::output::success(&format!("Deleted variable {name}"));
@@ -415,11 +424,12 @@ async fn delete_secret(
         return Ok(());
     }
 
-    if !force && !crate::yes_mode() {
-        if !crate::prompt_bool(&format!("Delete secret '{name}'?"), false).await? {
-            crate::output::info("Not deleted");
-            return Ok(());
-        }
+    if !force
+        && !crate::yes_mode()
+        && !crate::prompt_bool(&format!("Delete secret '{name}'?"), false).await?
+    {
+        crate::output::info("Not deleted");
+        return Ok(());
     }
 
     crate::verbose_log!("Deleting secret {name} on {}/{}", repo.owner(), repo.name());
@@ -463,4 +473,35 @@ fn parse_dispatch_kvs(s: &str) -> eyre::Result<(String, String)> {
         .ok_or_eyre("Input argument does not contain a '=' character!")?;
 
     Ok((s[..eq_idx].to_string(), s[eq_idx + 1..].to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_dispatch_kvs_simple() {
+        let (k, v) = parse_dispatch_kvs("key=value").unwrap();
+        assert_eq!(k, "key");
+        assert_eq!(v, "value");
+    }
+
+    #[test]
+    fn parse_dispatch_kvs_value_containing_equals() {
+        let (k, v) = parse_dispatch_kvs("key=a=b").unwrap();
+        assert_eq!(k, "key");
+        assert_eq!(v, "a=b");
+    }
+
+    #[test]
+    fn parse_dispatch_kvs_empty_value() {
+        let (k, v) = parse_dispatch_kvs("key=").unwrap();
+        assert_eq!(k, "key");
+        assert_eq!(v, "");
+    }
+
+    #[test]
+    fn parse_dispatch_kvs_no_equals_is_error() {
+        assert!(parse_dispatch_kvs("no-equals").is_err());
+    }
 }

@@ -197,7 +197,7 @@ async fn editor(contents: &mut String, ext: Option<&str>) -> eyre::Result<()> {
 
 // Read a filename, unless “-” is given, in which case, stdin is read and returned
 async fn read_file_or_stdin(path: &PathBuf) -> eyre::Result<String> {
-    if *path == PathBuf::from("-") {
+    if path.as_os_str() == "-" {
         // Typical use should be not interactive, so it's fine to call stdin() (see docs)
         let mut stdin = tokio::io::stdin();
         let mut body = String::new();
@@ -229,6 +229,7 @@ async fn tempfile(ext: Option<&str>) -> tokio::io::Result<(tokio::fs::File, std:
     }
     let file = tokio::fs::OpenOptions::new()
         .create(true)
+        .truncate(true)
         .read(true)
         .write(true)
         .open(&path)
@@ -256,6 +257,17 @@ fn host_name(url: &url::Url) -> &str {
 fn repo_url_host_name(url: &url::Url) -> &str {
     let host = host_name(url);
     host.rsplitn(3, '/').last().unwrap_or(host)
+}
+
+/// Open a URL in the user's browser, or print it if `FJ_BROWSER` is set to "".
+///
+/// This allows tests and scripts to suppress browser opening and capture the URL.
+fn open_url(url: &str) -> eyre::Result<()> {
+    if std::env::var("FJ_BROWSER").ok().as_deref() == Some("") {
+        output::info(&format!("URL: {url}"));
+        return Ok(());
+    }
+    open::that_detached(url).wrap_err("Failed to open URL")
 }
 
 use std::sync::OnceLock;
@@ -593,7 +605,7 @@ fn markdown(text: &str) -> String {
                 ansi_printer.start_bold();
                 ansi_printer
                     .out
-                    .extend(std::iter::repeat('#').take(heading.level as usize));
+                    .extend(std::iter::repeat_n('#', heading.level as usize));
                 ansi_printer.out.push(' ');
                 ansi_printer.cur_line_len += heading.level as usize + 1;
             }
@@ -642,7 +654,7 @@ fn markdown(text: &str) -> String {
                 }
                 ansi_printer
                     .out
-                    .extend(std::iter::repeat(horiz_rule).take(max_line_len));
+                    .extend(std::iter::repeat_n(horiz_rule, max_line_len));
                 ansi_printer.newline();
                 ansi_printer.newline();
             }
@@ -857,8 +869,10 @@ impl AnsiPrinter {
 
     fn newline(&mut self) {
         if self.current_bg().is_some() {
-            self.out
-                .extend(std::iter::repeat(' ').take(self.max_line_len - self.cur_line_len));
+            self.out.extend(std::iter::repeat_n(
+                ' ',
+                self.max_line_len - self.cur_line_len,
+            ));
         }
         self.pause_style();
         self.out.push('\n');
@@ -1087,4 +1101,104 @@ pub async fn edit_labels(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ssh_url_parse_scp_style() {
+        let url = ssh_url_parse("git@codeberg.org:alice/my-repo.git").unwrap();
+        assert_eq!(url.scheme(), "ssh");
+        assert_eq!(url.host_str(), Some("codeberg.org"));
+        assert_eq!(url.path(), "/alice/my-repo.git");
+    }
+
+    #[test]
+    fn ssh_url_parse_already_valid() {
+        let url = ssh_url_parse("ssh://git@codeberg.org/alice/my-repo.git").unwrap();
+        assert_eq!(url.scheme(), "ssh");
+        assert_eq!(url.host_str(), Some("codeberg.org"));
+    }
+
+    #[test]
+    fn ssh_url_parse_github_style() {
+        let url = ssh_url_parse("git@github.com:user/repo").unwrap();
+        assert_eq!(url.host_str(), Some("github.com"));
+        assert_eq!(url.path(), "/user/repo");
+    }
+
+    #[test]
+    fn host_name_extracts_host() {
+        let url = url::Url::parse("https://codeberg.org/alice/repo").unwrap();
+        assert_eq!(host_name(&url), "codeberg.org/alice/repo");
+    }
+
+    #[test]
+    fn host_name_strips_trailing_slash() {
+        let url = url::Url::parse("https://codeberg.org/").unwrap();
+        assert_eq!(host_name(&url), "codeberg.org");
+    }
+
+    #[test]
+    fn parse_color_valid_hex() {
+        assert_eq!(parse_color("ff8000").unwrap(), (255, 128, 0));
+    }
+
+    #[test]
+    fn parse_color_black() {
+        assert_eq!(parse_color("000000").unwrap(), (0, 0, 0));
+    }
+
+    #[test]
+    fn parse_color_white() {
+        assert_eq!(parse_color("ffffff").unwrap(), (255, 255, 255));
+    }
+
+    #[test]
+    fn parse_color_wrong_length() {
+        assert!(parse_color("fff").is_err());
+        assert!(parse_color("fffffff").is_err());
+    }
+
+    #[test]
+    fn parse_color_invalid_hex_digit() {
+        assert!(parse_color("gggggg").is_err());
+    }
+
+    #[test]
+    fn luma_white_is_high() {
+        assert!(luma(255, 255, 255) > 0.9);
+    }
+
+    #[test]
+    fn luma_black_is_zero() {
+        assert!(luma(0, 0, 0) < 0.01);
+    }
+
+    #[test]
+    fn darken_reduces_values() {
+        let (r, g, b) = darken(200, 200, 200);
+        assert!(r < 200);
+        assert!(g < 200);
+        assert!(b < 200);
+    }
+
+    #[test]
+    fn darken_black_stays_black() {
+        assert_eq!(darken(0, 0, 0), (0, 0, 0));
+    }
+
+    #[test]
+    fn repo_url_host_name_simple() {
+        let url = url::Url::parse("https://codeberg.org/alice/repo").unwrap();
+        assert_eq!(repo_url_host_name(&url), "codeberg.org");
+    }
+
+    #[test]
+    fn repo_url_host_name_with_subpath() {
+        let url = url::Url::parse("https://example.com/forge/alice/repo").unwrap();
+        assert_eq!(repo_url_host_name(&url), "example.com/forge");
+    }
 }

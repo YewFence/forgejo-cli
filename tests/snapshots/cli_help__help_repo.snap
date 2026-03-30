@@ -1,0 +1,24 @@
+---
+source: tests/cli_help.rs
+expression: stdout
+---
+Usage: fj repo [OPTIONS] <COMMAND>
+
+Commands:
+  create   Creates a new repository
+  fork     Fork a repository onto your account
+  migrate  
+  view     View a repo's info
+  readme   View a repo's README
+  clone    Clone a repo's code locally
+  star     Add a star to a repo
+  unstar   Take away a star from a repo
+  delete   Delete a repository
+  browse   Open a repository's page in your browser
+  labels   Manage a repo's issue labels
+  help     Print this message or the help of the given subcommand(s)
+
+Options:
+  -y, --yes      Skip all confirmation prompts (auto-confirm destructive actions)
+  -v, --verbose  Show verbose output (API calls, resolution steps)
+  -h, --help     Print help

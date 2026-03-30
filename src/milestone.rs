@@ -79,12 +79,8 @@ pub enum MilestoneSubcommand {
 
 impl MilestoneCommand {
     pub async fn run(self, keys: &mut KeyInfo, host_name: Option<&str>) -> eyre::Result<()> {
-        let repo = RepoInfo::get_current(
-            host_name,
-            self.repo.as_ref(),
-            self.remote.as_deref(),
-            keys,
-        )?;
+        let repo =
+            RepoInfo::get_current(host_name, self.repo.as_ref(), self.remote.as_deref(), keys)?;
         let api = keys.get_api(repo.host_url()).await?;
         let repo = repo
             .name()
@@ -102,9 +98,11 @@ impl MilestoneCommand {
                 due,
                 state,
             } => edit_milestone(repo, &api, &name, title, body, due, state).await?,
-            MilestoneSubcommand::Delete { name, force, dry_run } => {
-                delete_milestone(repo, &api, &name, force, dry_run).await?
-            }
+            MilestoneSubcommand::Delete {
+                name,
+                force,
+                dry_run,
+            } => delete_milestone(repo, &api, &name, force, dry_run).await?,
         }
         Ok(())
     }
@@ -118,10 +116,7 @@ pub async fn find_milestone(
 ) -> eyre::Result<Milestone> {
     // Try numeric ID first
     if let Ok(id) = name_or_id.parse::<i64>() {
-        if let Ok(ms) = api
-            .issue_get_milestone(repo.owner(), repo.name(), id)
-            .await
-        {
+        if let Ok(ms) = api.issue_get_milestone(repo.owner(), repo.name(), id).await {
             crate::verbose_log!("Resolved milestone '{}' by numeric ID", name_or_id);
             return Ok(ms);
         }
@@ -135,13 +130,7 @@ pub async fn find_milestone(
     };
     api.issue_get_milestones_list(repo.owner(), repo.name(), query)
         .stream()
-        .try_filter(|ms| {
-            future::ready(
-                ms.title
-                    .as_deref()
-                    .is_some_and(|t| t == name_or_id),
-            )
-        })
+        .try_filter(|ms| future::ready(ms.title.as_deref().is_some_and(|t| t == name_or_id)))
         .try_next()
         .await?
         .ok_or_else(|| eyre::eyre!("milestone '{}' not found", name_or_id))
@@ -152,11 +141,7 @@ fn parse_due_date(s: &str) -> eyre::Result<time::OffsetDateTime> {
         .map_err(|e| eyre::eyre!("invalid date '{}': {}", s, e))
 }
 
-async fn list_milestones(
-    repo: &RepoName,
-    api: &Forgejo,
-    state: String,
-) -> eyre::Result<()> {
+async fn list_milestones(repo: &RepoName, api: &Forgejo, state: String) -> eyre::Result<()> {
     let query = IssueGetMilestonesListQuery {
         state: Some(state),
         name: None,
@@ -166,38 +151,30 @@ async fn list_milestones(
         .all()
         .await?;
 
-    crate::output::print_list(
-        &milestones,
-        &["TITLE", "STATE", "ISSUES", "DUE"],
-        |ms| {
-            let title = ms.title.as_deref().unwrap_or("?").to_string();
-            let state = ms
-                .state
-                .as_ref()
-                .map(crate::output::colored_state)
-                .unwrap_or_default();
-            let open = ms.open_issues.unwrap_or(0);
-            let closed = ms.closed_issues.unwrap_or(0);
-            let issues = format!("{open} open, {closed} closed");
-            let due = ms
-                .due_on
-                .as_ref()
-                .map(|d| {
-                    d.format(&time::macros::format_description!("[year]-[month]-[day]"))
-                        .unwrap_or_else(|_| "?".to_string())
-                })
-                .unwrap_or_default();
-            vec![title, state, issues, due]
-        },
-    );
+    crate::output::print_list(&milestones, &["TITLE", "STATE", "ISSUES", "DUE"], |ms| {
+        let title = ms.title.as_deref().unwrap_or("?").to_string();
+        let state = ms
+            .state
+            .as_ref()
+            .map(crate::output::colored_state)
+            .unwrap_or_default();
+        let open = ms.open_issues.unwrap_or(0);
+        let closed = ms.closed_issues.unwrap_or(0);
+        let issues = format!("{open} open, {closed} closed");
+        let due = ms
+            .due_on
+            .as_ref()
+            .map(|d| {
+                d.format(&time::macros::format_description!("[year]-[month]-[day]"))
+                    .unwrap_or_else(|_| "?".to_string())
+            })
+            .unwrap_or_default();
+        vec![title, state, issues, due]
+    });
     Ok(())
 }
 
-async fn view_milestone(
-    repo: &RepoName,
-    api: &Forgejo,
-    name_or_id: &str,
-) -> eyre::Result<()> {
+async fn view_milestone(repo: &RepoName, api: &Forgejo, name_or_id: &str) -> eyre::Result<()> {
     let ms = find_milestone(api, repo, name_or_id).await?;
 
     crate::output::print_or_json(&ms, || {
@@ -233,9 +210,7 @@ async fn view_milestone(
         };
 
         println!("{yellow}{title}{reset} {dash} {state_str}");
-        println!(
-            "{open} open, {closed} closed {dark_grey}({progress}){reset}"
-        );
+        println!("{open} open, {closed} closed {dark_grey}({progress}){reset}");
 
         if let Some(due) = ms.due_on.as_ref() {
             let due_str = due
@@ -327,29 +302,53 @@ async fn delete_milestone(
     force: bool,
     dry_run: bool,
 ) -> eyre::Result<()> {
-    let ms = find_milestone(api, repo, name_or_id).await?;
-    let id = ms.id.ok_or_eyre("milestone does not have id")?;
-    let title = ms.title.as_deref().unwrap_or("?");
-
     if dry_run {
         crate::output::dry_run(&format!(
-            "delete milestone '{title}' on {}/{}",
+            "delete milestone '{name_or_id}' on {}/{}",
             repo.owner(),
             repo.name()
         ));
         return Ok(());
     }
 
-    if !force && !crate::yes_mode() {
-        if !crate::prompt_bool(&format!("Delete milestone '{title}'?"), false).await? {
-            crate::output::info("Not deleted");
-            return Ok(());
-        }
+    let ms = find_milestone(api, repo, name_or_id).await?;
+    let id = ms.id.ok_or_eyre("milestone does not have id")?;
+    let title = ms.title.as_deref().unwrap_or("?");
+
+    if !force
+        && !crate::yes_mode()
+        && !crate::prompt_bool(&format!("Delete milestone '{title}'?"), false).await?
+    {
+        crate::output::info("Not deleted");
+        return Ok(());
     }
 
-    crate::verbose_log!("Deleting milestone '{title}' on {}/{}", repo.owner(), repo.name());
+    crate::verbose_log!(
+        "Deleting milestone '{title}' on {}/{}",
+        repo.owner(),
+        repo.name()
+    );
     api.issue_delete_milestone(repo.owner(), repo.name(), id)
         .await?;
     crate::output::success(&format!("Deleted milestone '{title}'"));
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_due_date_valid_rfc3339() {
+        let dt = parse_due_date("2025-06-15T00:00:00Z").unwrap();
+        assert_eq!(dt.year(), 2025);
+        assert_eq!(dt.month(), time::Month::June);
+        assert_eq!(dt.day(), 15);
+    }
+
+    #[test]
+    fn parse_due_date_invalid_string_is_error() {
+        let err = parse_due_date("not-a-date").unwrap_err();
+        assert!(err.to_string().contains("invalid date"));
+    }
 }

@@ -49,6 +49,8 @@ Works alongside `git` to handle the Forgejo-specific stuff: issues, PRs, milesto
 - Relative time display for dates under 1 year
 
 **Project:**
+- Comprehensive test suite (93 tests: unit, snapshot, integration, parameterized dry-run)
+- CI via Forgejo Actions (tests, fmt, clippy)
 - Full command reference in the README
 - Open to contributions
 
@@ -446,7 +448,7 @@ fj completion bash > ~/.local/share/bash-completion/completions/fj
 
 ## Contributing
 
-PRs welcome. Keep them focused, make sure `cargo build` passes, test against a real instance.
+PRs welcome. Keep them focused, make sure `cargo test --all-targets` passes, and test against a real instance when touching API interactions.
 
 ## License
 

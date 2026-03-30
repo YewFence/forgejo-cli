@@ -57,7 +57,7 @@ impl TagCommand {
             remote_name,
             self.repo.as_ref(),
             self.remote.as_deref(),
-            &keys,
+            keys,
         )?;
         let api = keys.get_api(repo.host_url()).await?;
         let repo = repo
@@ -67,9 +67,11 @@ impl TagCommand {
             TagSubcommand::Create { name, body, branch } => {
                 create_tag(repo, &api, name, body, branch).await?
             }
-            TagSubcommand::Delete { name, force, dry_run } => {
-                delete_tag(repo, &api, name, force, dry_run).await?
-            }
+            TagSubcommand::Delete {
+                name,
+                force,
+                dry_run,
+            } => delete_tag(repo, &api, name, force, dry_run).await?,
             TagSubcommand::List { page } => list_tags(repo, &api, page).await?,
             TagSubcommand::View { name } => view_tag(repo, &api, name).await?,
         }
@@ -120,11 +122,12 @@ async fn delete_tag(
         return Ok(());
     }
 
-    if !force && !crate::yes_mode() {
-        if !crate::prompt_bool(&format!("Delete tag '{name}'?"), false).await? {
-            crate::output::info("Not deleted");
-            return Ok(());
-        }
+    if !force
+        && !crate::yes_mode()
+        && !crate::prompt_bool(&format!("Delete tag '{name}'?"), false).await?
+    {
+        crate::output::info("Not deleted");
+        return Ok(());
     }
 
     crate::verbose_log!("Deleting tag {name} on {}/{}", repo.owner(), repo.name());
@@ -140,16 +143,12 @@ async fn list_tags(repo: &RepoName, api: &Forgejo, page: u32) -> eyre::Result<()
         .page(page)
         .page_size(20)
         .await?;
-    crate::output::print_list(
-        &tags,
-        &["NAME", "MESSAGE"],
-        |tag| {
-            vec![
-                tag.name.as_deref().unwrap_or("?").to_string(),
-                tag.message.as_deref().unwrap_or("").to_string(),
-            ]
-        },
-    );
+    crate::output::print_list(&tags, &["NAME", "MESSAGE"], |tag| {
+        vec![
+            tag.name.as_deref().unwrap_or("?").to_string(),
+            tag.message.as_deref().unwrap_or("").to_string(),
+        ]
+    });
     Ok(())
 }
 

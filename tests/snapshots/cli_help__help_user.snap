@@ -1,0 +1,29 @@
+---
+source: tests/cli_help.rs
+expression: stdout
+---
+Usage: fj user [OPTIONS] <COMMAND>
+
+Commands:
+  search     Search for a user by username
+  view       View a user's profile page
+  browse     Open a user's profile page in your browser
+  follow     Follow a user
+  unfollow   Unfollow a user
+  following  List everyone a user's follows
+  followers  List a user's followers
+  block      Block a user
+  unblock    Unblock a user
+  repos      List a user's repositories
+  orgs       List the organizations a user is a member of
+  activity   List a user's recent activity
+  edit       Edit your user settings
+  key        Manage SSH keys
+  gpg        Manage GPG keys
+  help       Print this message or the help of the given subcommand(s)
+
+Options:
+  -R, --remote <REMOTE>  The local git remote that points to the repo to operate on
+  -y, --yes              Skip all confirmation prompts (auto-confirm destructive actions)
+  -v, --verbose          Show verbose output (API calls, resolution steps)
+  -h, --help             Print help

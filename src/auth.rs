@@ -36,13 +36,13 @@ impl AuthCommand {
     pub async fn run(self, keys: &mut crate::KeyInfo, host_name: Option<&str>) -> eyre::Result<()> {
         match self {
             AuthCommand::Login => {
-                let repo_info = crate::repo::RepoInfo::get_current(host_name, None, None, &keys)?;
+                let repo_info = crate::repo::RepoInfo::get_current(host_name, None, None, keys)?;
                 let host_url = repo_info.host_url();
                 let client_info = get_client_info_for(host_url).await?;
                 if let Some(client_id) = &client_info {
                     oauth_login(keys, host_url, client_id).await?;
                 } else {
-                    let host_domain = crate::host_name(&host_url);
+                    let host_domain = crate::host_name(host_url);
                     let applications_url =
                         format!("https://{host_domain}/user/settings/applications");
 
@@ -61,13 +61,13 @@ impl AuthCommand {
                 }
             }
             AuthCommand::AddKey { user, key } => {
-                let repo_info = crate::repo::RepoInfo::get_current(host_name, None, None, &keys)?;
+                let repo_info = crate::repo::RepoInfo::get_current(host_name, None, None, keys)?;
                 let host_url = repo_info.host_url();
                 let key = match key {
                     Some(key) => key,
                     None => crate::readline("new key: ").await?.trim().to_string(),
                 };
-                let host = crate::host_name(&host_url);
+                let host = crate::host_name(host_url);
                 if !keys.hosts.contains_key(host) {
                     let mut login = crate::keys::LoginInfo::Application {
                         name: user,
@@ -80,8 +80,8 @@ impl AuthCommand {
                 }
             }
             AuthCommand::UseSsh { use_ssh } => {
-                let repo_info = crate::repo::RepoInfo::get_current(host_name, None, None, &keys)?;
-                let host = crate::host_name(&repo_info.host_url());
+                let repo_info = crate::repo::RepoInfo::get_current(host_name, None, None, keys)?;
+                let host = crate::host_name(repo_info.host_url());
                 if !keys.hosts.contains_key(host) {
                     crate::output::error(&format!("Not logged in to {host}"));
                 } else {
@@ -90,14 +90,20 @@ impl AuthCommand {
                         if already_present {
                             crate::output::success(&format!("Now using SSH for {host} by default"));
                         } else {
-                            crate::output::info(&format!("Already using SSH for {host} by default"));
+                            crate::output::info(&format!(
+                                "Already using SSH for {host} by default"
+                            ));
                         }
                     } else {
                         let was_present = keys.default_ssh.remove(host);
                         if was_present {
-                            crate::output::success(&format!("No longer using SSH for {host} by default"));
+                            crate::output::success(&format!(
+                                "No longer using SSH for {host} by default"
+                            ));
                         } else {
-                            crate::output::info(&format!("Already not using SSH for {host} by default"));
+                            crate::output::info(&format!(
+                                "Already not using SSH for {host} by default"
+                            ));
                         }
                     }
                 }
@@ -277,7 +283,7 @@ async fn oauth_login(
         expires_at,
     };
     add_ssh_alias(&mut login_info, host, keys).await;
-    let domain = crate::host_name(&host);
+    let domain = crate::host_name(host);
     keys.hosts.insert(domain.to_owned(), login_info);
 
     Ok(())
@@ -285,6 +291,7 @@ async fn oauth_login(
 
 use tokio::{sync::mpsc::Receiver, task::JoinHandle};
 
+#[allow(clippy::type_complexity)]
 fn auth_server() -> (
     JoinHandle<eyre::Result<()>>,
     Receiver<Result<Option<(String, String)>, String>>,
@@ -346,13 +353,21 @@ async fn add_ssh_alias(
         Err(_) => return,
     };
     if let Some(ssh_url) = get_instance_ssh_url(api).await {
-        let http_host = crate::host_name(&host_url);
+        let http_host = crate::host_name(host_url);
         let ssh_host = crate::host_name(&ssh_url);
         if http_host != ssh_host {
             keys.aliases
                 .insert(ssh_host.to_string(), http_host.to_string());
         }
     }
+}
+
+async fn get_instance_ssh_url(api: forgejo_api::Forgejo) -> Option<url::Url> {
+    let query = forgejo_api::structs::RepoSearchQuery::default();
+    let results = api.repo_search(query).page_size(1).await.ok()?;
+    let ssh_url = results.data?.pop()?.ssh_url?;
+    let (instance_ssh_url, _) = crate::repo::url_strip_repo_name(ssh_url).ok()?;
+    Some(instance_ssh_url)
 }
 
 #[cfg(test)]
@@ -366,17 +381,42 @@ mod tests {
         let code_verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
         let expected = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
 
-        let challenge =
-            base64ct::Base64UrlUnpadded::encode_string(sha2::Sha256::digest(code_verifier).as_slice());
+        let challenge = base64ct::Base64UrlUnpadded::encode_string(
+            sha2::Sha256::digest(code_verifier).as_slice(),
+        );
 
-        assert_eq!(challenge, expected, "PKCE S256 challenge must match RFC 7636 Appendix B");
+        assert_eq!(
+            challenge, expected,
+            "PKCE S256 challenge must match RFC 7636 Appendix B"
+        );
     }
-}
 
-async fn get_instance_ssh_url(api: forgejo_api::Forgejo) -> Option<url::Url> {
-    let query = forgejo_api::structs::RepoSearchQuery::default();
-    let results = api.repo_search(query).page_size(1).await.ok()?;
-    let ssh_url = results.data?.pop()?.ssh_url?;
-    let (instance_ssh_url, _) = crate::repo::url_strip_repo_name(ssh_url).ok()?;
-    Some(instance_ssh_url)
+    #[test]
+    fn parse_client_info_simple() {
+        let file = "codeberg.org abc-123\ngitea.com def-456\n";
+        let map = super::parse_client_info_file(file).unwrap();
+        assert_eq!(map["codeberg.org"], "abc-123");
+        assert_eq!(map["gitea.com"], "def-456");
+    }
+
+    #[test]
+    fn parse_client_info_with_comments() {
+        let file = "# this is a comment\ncodeberg.org abc-123 # inline comment\n";
+        let map = super::parse_client_info_file(file).unwrap();
+        assert_eq!(map["codeberg.org"], "abc-123");
+        assert_eq!(map.len(), 1);
+    }
+
+    #[test]
+    fn parse_client_info_blank_lines() {
+        let file = "\n\ncodeberg.org abc-123\n\n";
+        let map = super::parse_client_info_file(file).unwrap();
+        assert_eq!(map.len(), 1);
+    }
+
+    #[test]
+    fn parse_client_info_missing_client_id() {
+        let file = "codeberg.org\n";
+        assert!(super::parse_client_info_file(file).is_err());
+    }
 }

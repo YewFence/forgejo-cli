@@ -8,11 +8,7 @@ use serde::Serialize;
 ///
 /// In `--json` mode, serializes `items` to JSON and prints that instead.
 /// Empty lists print `[]` in JSON mode and an info message in human mode.
-pub fn print_list<T: Serialize>(
-    items: &[T],
-    headers: &[&str],
-    row_fn: impl Fn(&T) -> Vec<String>,
-) {
+pub fn print_list<T: Serialize>(items: &[T], headers: &[&str], row_fn: impl Fn(&T) -> Vec<String>) {
     if crate::json_mode() {
         match serde_json::to_value(items) {
             Ok(val) => print_json(&val),
@@ -112,9 +108,7 @@ pub fn verbose(msg: &str) {
 
 /// Print a dry-run preview message to stderr.
 pub fn dry_run(msg: &str) {
-    let crate::SpecialRender {
-        yellow, reset, ..
-    } = crate::special_render();
+    let crate::SpecialRender { yellow, reset, .. } = crate::special_render();
     eprintln!("{yellow}[dry-run]{reset} Would {msg}");
 }
 
@@ -168,5 +162,64 @@ pub fn colored_state(state: &forgejo_api::structs::StateType) -> String {
     match state {
         forgejo_api::structs::StateType::Open => format!("{bright_green}open{reset}"),
         forgejo_api::structs::StateType::Closed => format!("{bright_red}closed{reset}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use time::Duration;
+    use time::OffsetDateTime;
+
+    fn ago(duration: Duration) -> OffsetDateTime {
+        OffsetDateTime::now_utc() - duration
+    }
+
+    #[test]
+    fn relative_time_just_now() {
+        let dt = ago(Duration::seconds(30));
+        assert_eq!(relative_time(&dt), "now");
+    }
+
+    #[test]
+    fn relative_time_minutes() {
+        let dt = ago(Duration::minutes(5));
+        assert_eq!(relative_time(&dt), "5m");
+    }
+
+    #[test]
+    fn relative_time_hours() {
+        let dt = ago(Duration::hours(3));
+        assert_eq!(relative_time(&dt), "3h");
+    }
+
+    #[test]
+    fn relative_time_days() {
+        let dt = ago(Duration::days(4));
+        assert_eq!(relative_time(&dt), "4d");
+    }
+
+    #[test]
+    fn relative_time_weeks() {
+        let dt = ago(Duration::weeks(2));
+        assert_eq!(relative_time(&dt), "2w");
+    }
+
+    #[test]
+    fn relative_time_months() {
+        let dt = ago(Duration::days(90));
+        assert_eq!(relative_time(&dt), "3mo");
+    }
+
+    #[test]
+    fn relative_time_years() {
+        let dt = ago(Duration::days(400));
+        assert_eq!(relative_time(&dt), "1y");
+    }
+
+    #[test]
+    fn relative_time_future() {
+        let dt = OffsetDateTime::now_utc() + Duration::hours(1);
+        assert_eq!(relative_time(&dt), "future");
     }
 }

@@ -1,0 +1,19 @@
+---
+source: tests/cli_help.rs
+expression: stdout
+---
+Usage: fj wiki [OPTIONS] <COMMAND>
+
+Commands:
+  contents  
+  view      
+  clone     
+  browse    
+  help      Print this message or the help of the given subcommand(s)
+
+Options:
+  -R, --remote <REMOTE>  The local git remote that points to the repo to operate on
+  -r, --repo <REPO>      The repo to operate on
+  -y, --yes              Skip all confirmation prompts (auto-confirm destructive actions)
+  -v, --verbose          Show verbose output (API calls, resolution steps)
+  -h, --help             Print help

@@ -52,7 +52,7 @@ impl WikiCommand {
         use WikiSubcommand::*;
 
         let repo =
-            RepoInfo::get_current(host_name, self.repo.as_ref(), self.remote.as_deref(), &keys)?;
+            RepoInfo::get_current(host_name, self.repo.as_ref(), self.remote.as_deref(), keys)?;
         let api = keys.get_api(repo.host_url()).await?;
         let repo_name = repo
             .name()
@@ -66,7 +66,7 @@ impl WikiCommand {
                 ssh,
                 identity_file: identity,
             } => {
-                let url_host = crate::host_name(&repo.host_url());
+                let url_host = crate::host_name(repo.host_url());
                 let ssh = ssh
                     .unwrap_or_else(|| Some(keys.default_ssh.contains(url_host)))
                     .unwrap_or(true);
@@ -84,13 +84,9 @@ async fn wiki_contents(repo: &RepoName, api: &Forgejo) -> eyre::Result<()> {
         .all()
         .await?;
 
-    crate::output::print_list(
-        &pages,
-        &["TITLE"],
-        |page| {
-            vec![page.title.as_deref().unwrap_or("?").to_string()]
-        },
-    );
+    crate::output::print_list(&pages, &["TITLE"], |page| {
+        vec![page.title.as_deref().unwrap_or("?").to_string()]
+    });
 
     Ok(())
 }
@@ -130,7 +126,7 @@ async fn browse_wiki_page(repo: &RepoName, api: &Forgejo, page: &str) -> eyre::R
         .html_url
         .as_ref()
         .ok_or_eyre("page does not have html url")?;
-    open::that_detached(html_url.as_str()).wrap_err("Failed to open URL")?;
+    crate::open_url(html_url.as_str())?;
     Ok(())
 }
 

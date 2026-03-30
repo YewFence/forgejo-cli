@@ -319,7 +319,7 @@ impl PrCommand {
     pub async fn run(self, keys: &mut crate::KeyInfo, host_name: Option<&str>) -> eyre::Result<()> {
         use PrSubcommand::*;
         let repo_info =
-            RepoInfo::get_current(host_name, self.repo(), self.remote.as_deref(), &keys)?;
+            RepoInfo::get_current(host_name, self.repo(), self.remote.as_deref(), keys)?;
         let api = keys.get_api(repo_info.host_url()).await?;
         let repo = repo_info.name().ok_or_else(|| self.no_repo_error())?;
         match self.command {
@@ -402,7 +402,12 @@ impl PrCommand {
                 state,
                 milestone,
                 repo: _,
-            } => view_prs(repo, &api, query, labels, creator, assignee, state, milestone).await?,
+            } => {
+                view_prs(
+                    repo, &api, query, labels, creator, assignee, state, milestone,
+                )
+                .await?
+            }
             Edit { pr, command } => {
                 let pr = pr.map(|pr| pr.number);
                 match command {
@@ -441,7 +446,7 @@ impl PrCommand {
                 ssh,
                 identity_file: identity,
             } => {
-                let url_host = crate::host_name(&repo_info.host_url());
+                let url_host = crate::host_name(repo_info.host_url());
                 let ssh = ssh
                     .unwrap_or_else(|| Some(keys.default_ssh.contains(url_host)))
                     .unwrap_or(true);
@@ -641,7 +646,7 @@ pub async fn view_pr(repo: &RepoName, api: &Forgejo, id: Option<i64>) -> eyre::R
 async fn view_pr_labels(repo: &RepoName, api: &Forgejo, pr: Option<i64>) -> eyre::Result<()> {
     let pr = try_get_pr(repo, api, pr).await?;
     let labels = pr.labels.as_deref().unwrap_or_default();
-    crate::render_label_list(&labels)?;
+    crate::render_label_list(labels)?;
     Ok(())
 }
 
@@ -899,6 +904,7 @@ pub async fn get_template_file(
     Ok(None)
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn create_pr(
     repo: &RepoName,
     api: &Forgejo,
@@ -1037,7 +1043,7 @@ async fn create_pr(
             .path_segments_mut()
             .expect("invalid url")
             .extend(["compare", &format!("{base}...{head}")]);
-        open::that_detached(pr_create_url.as_str()).wrap_err("Failed to open URL")?;
+        crate::open_url(pr_create_url.as_str())?;
         crate::output::info(&format!("Opened {pr_create_url} in browser"));
     } else {
         let body_from_file = match body_file {
@@ -1058,7 +1064,11 @@ async fn create_pr(
             Some((head, head_branch_name)) => {
                 let base_opt = CreatePullRequestOption {
                     assignee: None,
-                    assignees: if assignees.is_empty() { None } else { Some(assignees) },
+                    assignees: if assignees.is_empty() {
+                        None
+                    } else {
+                        Some(assignees)
+                    },
                     base: Some(base.to_owned()),
                     body: None,
                     due_date: None,
@@ -1299,13 +1309,13 @@ fn get_commit_msg(commit: &forgejo_api::structs::Commit) -> eyre::Result<(&str, 
     let (commit_title, commit_body) = commit_message
         .split_once('\n')
         .unwrap_or((commit_message, ""));
-    Ok((commit_title, commit_body.trim_start_matches(&['\n', '\r'])))
+    Ok((commit_title, commit_body.trim_start_matches(['\n', '\r'])))
 }
 
 fn body_from_commit_messages<'s>(msgs: impl Iterator<Item = (&'s str, &'s str)>) -> String {
     let mut body = String::new();
     for (commit_title, commit_body) in msgs {
-        body.push_str(&commit_title);
+        body.push_str(commit_title);
         body.push('\n');
         for (i, line) in commit_body.lines().enumerate() {
             if i == 0 {
@@ -1494,6 +1504,7 @@ async fn checkout_pr(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn view_prs(
     repo: &RepoName,
     api: &Forgejo,
@@ -1738,7 +1749,7 @@ pub async fn browse_pr(repo: &RepoName, api: &Forgejo, id: i64) -> eyre::Result<
         .html_url
         .as_ref()
         .ok_or_else(|| eyre::eyre!("pr does not have html_url"))?;
-    open::that_detached(html_url.as_str()).wrap_err("Failed to open URL")?;
+    crate::open_url(html_url.as_str())?;
     crate::output::info(&format!("Opened {html_url} in browser"));
     Ok(())
 }
@@ -1874,14 +1885,13 @@ async fn find_pr_from_branch(
     api: &Forgejo,
     head: &str,
 ) -> eyre::Result<Option<forgejo_api::structs::PullRequest>> {
-    Ok(api
-        .repo_list_branches(repo_owner, repo_name)
+    api.repo_list_branches(repo_owner, repo_name)
         .stream()
         .map_err(|e| e.into())
         .try_filter_map(|branch| check_branch_pair(repo_owner, repo_name, api, branch, head))
         .boxed_local()
         .try_next()
-        .await?)
+        .await
 }
 
 async fn check_branch_pair(
@@ -1953,3 +1963,59 @@ fn repo_name_from_pr(pr: &forgejo_api::structs::PullRequest) -> eyre::Result<Rep
 //    }
 //    s
 //}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn body_from_single_commit_with_body() {
+        let msgs = vec![(
+            "Fix login bug",
+            "The session cookie was not being set\ncorrectly on redirect.",
+        )];
+        let result = body_from_commit_messages(msgs.into_iter());
+        let expected = "\
+Fix login bug
+: The session cookie was not being set
+  correctly on redirect.
+
+";
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn body_from_single_commit_without_body() {
+        let msgs = vec![("Fix typo", "")];
+        let result = body_from_commit_messages(msgs.into_iter());
+        // Empty body produces no ": " lines, just title + blank line
+        let expected = "Fix typo\n\n";
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn body_from_multiple_commits() {
+        let msgs = vec![
+            ("First commit", "Body of first"),
+            ("Second commit", "Body of second\nExtra line"),
+        ];
+        let result = body_from_commit_messages(msgs.into_iter());
+        let expected = "\
+First commit
+: Body of first
+
+Second commit
+: Body of second
+  Extra line
+
+";
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn body_from_empty_iterator() {
+        let msgs: Vec<(&str, &str)> = vec![];
+        let result = body_from_commit_messages(msgs.into_iter());
+        assert_eq!(result, "");
+    }
+}

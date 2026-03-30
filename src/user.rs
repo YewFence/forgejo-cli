@@ -150,13 +150,13 @@ pub enum EditCommand {
     /// Set your activity visibility
     Activity {
         /// The visibility of your activity.
-        #[clap(long, short)]
+        #[clap(long)]
         visibility: VisbilitySetting,
     },
     /// Manage the email addresses associated with your account
     Email {
         /// Set the visibility of your email address.
-        #[clap(long, short)]
+        #[clap(long)]
         visibility: Option<VisbilitySetting>,
         /// Add a new email address
         #[clap(long, short)]
@@ -281,7 +281,7 @@ pub enum VisbilitySetting {
 
 impl UserCommand {
     pub async fn run(self, keys: &mut crate::KeyInfo, host_name: Option<&str>) -> eyre::Result<()> {
-        let repo = RepoInfo::get_current(host_name, None, self.remote.as_deref(), &keys)?;
+        let repo = RepoInfo::get_current(host_name, None, self.remote.as_deref(), keys)?;
         let api = keys.get_api(repo.host_url()).await?;
         match self.command {
             UserSubcommand::Search { query, page } => user_search(&api, &query, page).await?,
@@ -336,7 +336,9 @@ impl UserCommand {
             UserSubcommand::Gpg(cmd) => match cmd {
                 GpgCommand::List { verbose } => list_gpg(&api, verbose).await?,
                 GpgCommand::View { id } => view_gpg(&api, id).await?,
-                GpgCommand::Delete { id, force, dry_run } => delete_gpg(&api, id, force, dry_run).await?,
+                GpgCommand::Delete { id, force, dry_run } => {
+                    delete_gpg(&api, id, force, dry_run).await?
+                }
                 GpgCommand::Upload { key, no_verify } => upload_gpg(&api, key, no_verify).await?,
                 GpgCommand::Verify { id } => verify_gpg(&api, id).await?,
             },
@@ -374,13 +376,9 @@ async fn user_search(api: &Forgejo, query: &str, page: Option<usize>) -> eyre::R
             }
         } else {
             let page_users: Vec<_> = users.iter().skip(page_start).take(20).collect();
-            crate::output::print_list(
-                &page_users,
-                &["USERNAME"],
-                |user| {
-                    vec![user.login.as_deref().unwrap_or("?").to_string()]
-                },
-            );
+            crate::output::print_list(&page_users, &["USERNAME"], |user| {
+                vec![user.login.as_deref().unwrap_or("?").to_string()]
+            });
             crate::output::info(&format!(
                 "Showing {}-{} of {} results ({page}/{pages_total})",
                 page_start + 1,
@@ -478,7 +476,7 @@ async fn browse_user(api: &Forgejo, host_url: &url::Url, user: Option<&str>) -> 
     url.path_segments_mut()
         .map_err(|_| eyre::eyre!("invalid host url"))?
         .push(&username);
-    open::that_detached(url.as_str()).wrap_err("Failed to open URL")?;
+    crate::open_url(url.as_str())?;
 
     Ok(())
 }
@@ -507,13 +505,9 @@ async fn list_following(api: &Forgejo, user: Option<&str>) -> eyre::Result<()> {
             None => crate::output::info("You aren't following anyone"),
         }
     } else {
-        crate::output::print_list(
-            &following,
-            &["USERNAME"],
-            |user| {
-                vec![user.login.as_deref().unwrap_or("?").to_string()]
-            },
-        );
+        crate::output::print_list(&following, &["USERNAME"], |user| {
+            vec![user.login.as_deref().unwrap_or("?").to_string()]
+        });
     }
 
     Ok(())
@@ -531,13 +525,9 @@ async fn list_followers(api: &Forgejo, user: Option<&str>) -> eyre::Result<()> {
             None => crate::output::info("You have no followers"),
         }
     } else {
-        crate::output::print_list(
-            &followers,
-            &["USERNAME"],
-            |user| {
-                vec![user.login.as_deref().unwrap_or("?").to_string()]
-            },
-        );
+        crate::output::print_list(&followers, &["USERNAME"], |user| {
+            vec![user.login.as_deref().unwrap_or("?").to_string()]
+        });
     }
 
     Ok(())
@@ -622,13 +612,9 @@ async fn list_repos(
         };
         repos.sort_unstable_by(sort_fn);
 
-        crate::output::print_list(
-            &repos,
-            &["NAME"],
-            |repo| {
-                vec![repo.full_name.as_deref().unwrap_or("?").to_string()]
-            },
-        );
+        crate::output::print_list(&repos, &["NAME"], |repo| {
+            vec![repo.full_name.as_deref().unwrap_or("?").to_string()]
+        });
 
         let page_start = (page - 1) * 50;
         let total_items = match headers.x_total_count {
@@ -658,22 +644,20 @@ async fn list_orgs(api: &Forgejo, user: Option<&str>) -> eyre::Result<()> {
 
     if orgs.is_empty() {
         match user {
-            Some(user) => crate::output::info(&format!("{user} is not a member of any organizations")),
+            Some(user) => {
+                crate::output::info(&format!("{user} is not a member of any organizations"))
+            }
             None => crate::output::info("You are not a member of any organizations"),
         }
     } else {
         orgs.sort_unstable_by(|a, b| a.name.cmp(&b.name));
 
-        crate::output::print_list(
-            &orgs,
-            &["NAME", "FULL NAME"],
-            |org| {
-                vec![
-                    org.name.as_deref().unwrap_or("?").to_string(),
-                    org.full_name.as_deref().unwrap_or("").to_string(),
-                ]
-            },
-        );
+        crate::output::print_list(&orgs, &["NAME", "FULL NAME"], |org| {
+            vec![
+                org.name.as_deref().unwrap_or("?").to_string(),
+                org.full_name.as_deref().unwrap_or("").to_string(),
+            ]
+        });
     }
     Ok(())
 }
@@ -751,7 +735,10 @@ pub fn print_activity(activity: &forgejo_api::structs::Activity) -> eyre::Result
                 .and_then(|v| v.into_iter().next())
                 .unwrap_or_else(|| content.to_string())
         } else {
-            content.split_once("|").map_or(content, |(id, _)| id).to_string()
+            content
+                .split_once("|")
+                .map_or(content, |(id, _)| id)
+                .to_string()
         };
         Ok((full_name, issue_id))
     }
@@ -1217,11 +1204,12 @@ async fn delete_key(api: &Forgejo, id: i64, force: bool, dry_run: bool) -> eyre:
         return Ok(());
     }
 
-    if !force && !crate::yes_mode() {
-        if !crate::prompt_bool(&format!("Delete SSH key with ID {id}?"), false).await? {
-            crate::output::info("Not deleted");
-            return Ok(());
-        }
+    if !force
+        && !crate::yes_mode()
+        && !crate::prompt_bool(&format!("Delete SSH key with ID {id}?"), false).await?
+    {
+        crate::output::info("Not deleted");
+        return Ok(());
     }
 
     crate::verbose_log!("Deleting SSH key with ID {id}");
@@ -1316,7 +1304,7 @@ async fn upload_key(
     let title = if let Some(title) = title {
         title
     } else {
-        let Some(guess) = trimmed.split(' ').last() else {
+        let Some(guess) = trimmed.split(' ').next_back() else {
             eyre::bail!(
                 "Couldn't guess key title, please provide one explicitly and check your key file."
             );
@@ -1431,7 +1419,7 @@ fn print_gpg(key: &forgejo_api::structs::GPGKey, indent_depth: usize) {
         crate::DisplayBool(key.verified.unwrap_or(false))
     );
 
-    for email in key.emails.as_ref().map(Vec::as_slice).unwrap_or_default() {
+    for email in key.emails.as_deref().unwrap_or_default() {
         if let forgejo_api::structs::GPGKeyEmail {
             email: Some(email),
             verified,
@@ -1449,7 +1437,7 @@ fn print_gpg(key: &forgejo_api::structs::GPGKey, indent_depth: usize) {
         println!("\n{indent}{key}");
     }
 
-    for subkey in key.subkeys.as_ref().map(Vec::as_slice).unwrap_or(&[]) {
+    for subkey in key.subkeys.as_deref().unwrap_or(&[]) {
         println!(
             "\n{indent}{bold}Subkey {bright_magenta}{}{reset}:",
             crate::DisplayOptional(key.id, "?")
@@ -1525,7 +1513,9 @@ async fn gpg_verify_token(api: &Forgejo, key_name: &str) -> eyre::Result<String>
     crate::output::info("Fetching verification token...");
     let token = api.get_verification_token().await?;
 
-    crate::output::info(&format!("Signing verification token with key '{key_name}'..."));
+    crate::output::info(&format!(
+        "Signing verification token with key '{key_name}'..."
+    ));
     let mut child = tokio::process::Command::new("gpg")
         .arg("--armor")
         .arg("--default-key")

@@ -144,30 +144,33 @@ pub struct TeamEditFlags {
 impl TeamSubcommand {
     pub async fn run(self, api: &forgejo_api::Forgejo) -> eyre::Result<()> {
         match self {
-            TeamSubcommand::List { org } => list_teams(&api, org).await?,
+            TeamSubcommand::List { org } => list_teams(api, org).await?,
             TeamSubcommand::View {
                 org,
                 name,
                 list_permissions,
-            } => view_team(&api, org, name, list_permissions).await?,
+            } => view_team(api, org, name, list_permissions).await?,
             TeamSubcommand::Create {
                 org,
                 name,
                 flags,
                 options,
-            } => create_team(&api, org, name, flags, options).await?,
+            } => create_team(api, org, name, flags, options).await?,
             TeamSubcommand::Edit {
                 org,
                 name,
                 new_name,
                 flags,
                 options,
-            } => edit_team(&api, org, name, new_name, flags, options).await?,
-            TeamSubcommand::Delete { org, name, force, dry_run } => {
-                delete_team(&api, org, name, force, dry_run).await?
-            }
-            TeamSubcommand::Repo(subcommand) => subcommand.run(&api).await?,
-            TeamSubcommand::Member(subcommand) => subcommand.run(&api).await?,
+            } => edit_team(api, org, name, new_name, flags, options).await?,
+            TeamSubcommand::Delete {
+                org,
+                name,
+                force,
+                dry_run,
+            } => delete_team(api, org, name, force, dry_run).await?,
+            TeamSubcommand::Repo(subcommand) => subcommand.run(api).await?,
+            TeamSubcommand::Member(subcommand) => subcommand.run(api).await?,
         }
         Ok(())
     }
@@ -178,7 +181,7 @@ async fn find_team_by_name(
     org: &str,
     name: &str,
 ) -> eyre::Result<forgejo_api::structs::Team> {
-    api.org_list_teams(&org)
+    api.org_list_teams(org)
         .stream()
         .try_filter(|team| {
             future::ready(
@@ -196,13 +199,9 @@ async fn list_teams(api: &Forgejo, org: String) -> eyre::Result<()> {
     let mut teams = api.org_list_teams(&org).all().await?;
     teams.sort_unstable_by_key(permission_sort_id);
 
-    crate::output::print_list(
-        &teams,
-        &["NAME"],
-        |team| {
-            vec![team.name.as_deref().unwrap_or("?").to_string()]
-        },
-    );
+    crate::output::print_list(&teams, &["NAME"], |team| {
+        vec![team.name.as_deref().unwrap_or("?").to_string()]
+    });
     Ok(())
 }
 
@@ -367,7 +366,7 @@ async fn create_team(
         name,
         permission: flags
             .admin
-            .then(|| forgejo_api::structs::CreateTeamOptionPermission::Admin),
+            .then_some(forgejo_api::structs::CreateTeamOptionPermission::Admin),
         units: None,
         units_map: Some(units),
     };
@@ -411,7 +410,7 @@ async fn edit_team(
         name: new_name,
         permission: flags
             .admin
-            .and_then(|b| b.then(|| forgejo_api::structs::EditTeamOptionPermission::Admin)),
+            .and_then(|b| b.then_some(forgejo_api::structs::EditTeamOptionPermission::Admin)),
         units: None,
         units_map: Some(units),
     };
@@ -432,11 +431,12 @@ async fn delete_team(
         return Ok(());
     }
 
-    if !force && !crate::yes_mode() {
-        if !crate::prompt_bool(&format!("Delete team '{org}/{name}'?"), false).await? {
-            crate::output::info("Not deleted");
-            return Ok(());
-        }
+    if !force
+        && !crate::yes_mode()
+        && !crate::prompt_bool(&format!("Delete team '{org}/{name}'?"), false).await?
+    {
+        crate::output::info("Not deleted");
+        return Ok(());
     }
 
     crate::verbose_log!("Deleting team {org}/{name}");
@@ -493,14 +493,18 @@ impl TeamRepoSubcommand {
     async fn run(self, api: &Forgejo) -> eyre::Result<()> {
         match self {
             TeamRepoSubcommand::List { org, team, page } => {
-                list_team_repos(&api, org, team, page).await?
+                list_team_repos(api, org, team, page).await?
             }
             TeamRepoSubcommand::Add { org, team, repo } => {
-                add_repo_to_team(&api, org, team, repo).await?
+                add_repo_to_team(api, org, team, repo).await?
             }
-            TeamRepoSubcommand::Rm { org, team, repo, force, dry_run } => {
-                remove_repo_from_team(&api, org, team, repo, force, dry_run).await?
-            }
+            TeamRepoSubcommand::Rm {
+                org,
+                team,
+                repo,
+                force,
+                dry_run,
+            } => remove_repo_from_team(api, org, team, repo, force, dry_run).await?,
         }
         Ok(())
     }
@@ -513,13 +517,9 @@ async fn list_team_repos(api: &Forgejo, org: String, team: String, page: u32) ->
         .ok_or_eyre("team does not have id")?;
     let (headers, repos) = api.org_list_team_repos(id).page(page).page_size(20).await?;
 
-    crate::output::print_list(
-        &repos,
-        &["NAME"],
-        |repo| {
-            vec![repo.full_name.as_deref().unwrap_or("?").to_string()]
-        },
-    );
+    crate::output::print_list(&repos, &["NAME"], |repo| {
+        vec![repo.full_name.as_deref().unwrap_or("?").to_string()]
+    });
     if !repos.is_empty() && !crate::json_mode() {
         let count = headers.x_total_count.unwrap_or_default();
         println!("Page {} of {}", page, (count as u64).div_ceil(20));
@@ -555,16 +555,12 @@ async fn remove_repo_from_team(
         return Ok(());
     }
 
-    if !force && !crate::yes_mode() {
-        if !crate::prompt_bool(
-            &format!("Remove '{org}/{repo}' from team '{team}'?"),
-            false,
-        )
-        .await?
-        {
-            crate::output::info("Not removed");
-            return Ok(());
-        }
+    if !force
+        && !crate::yes_mode()
+        && !crate::prompt_bool(&format!("Remove '{org}/{repo}' from team '{team}'?"), false).await?
+    {
+        crate::output::info("Not removed");
+        return Ok(());
     }
 
     crate::verbose_log!("Removing {org}/{repo} from team {team}");
@@ -619,14 +615,18 @@ impl TeamMemberSubcommand {
     async fn run(self, api: &Forgejo) -> eyre::Result<()> {
         match self {
             TeamMemberSubcommand::List { org, team, page } => {
-                list_team_members(&api, org, team, page).await?
+                list_team_members(api, org, team, page).await?
             }
             TeamMemberSubcommand::Add { org, team, user } => {
-                add_user_to_team(&api, org, team, user).await?
+                add_user_to_team(api, org, team, user).await?
             }
-            TeamMemberSubcommand::Rm { org, team, user, force, dry_run } => {
-                remove_user_from_team(&api, org, team, user, force, dry_run).await?
-            }
+            TeamMemberSubcommand::Rm {
+                org,
+                team,
+                user,
+                force,
+                dry_run,
+            } => remove_user_from_team(api, org, team, user, force, dry_run).await?,
         }
         Ok(())
     }
@@ -648,13 +648,9 @@ async fn list_team_members(
         .page_size(20)
         .await?;
 
-    crate::output::print_list(
-        &users,
-        &["USERNAME"],
-        |user| {
-            vec![user.login.as_deref().unwrap_or("?").to_string()]
-        },
-    );
+    crate::output::print_list(&users, &["USERNAME"], |user| {
+        vec![user.login.as_deref().unwrap_or("?").to_string()]
+    });
     if !users.is_empty() && !crate::json_mode() {
         let count = headers.x_total_count.unwrap_or_default();
         println!("Page {} of {}", page, (count as u64).div_ceil(20));
@@ -690,16 +686,12 @@ async fn remove_user_from_team(
         return Ok(());
     }
 
-    if !force && !crate::yes_mode() {
-        if !crate::prompt_bool(
-            &format!("Remove '{user}' from team '{team}'?"),
-            false,
-        )
-        .await?
-        {
-            crate::output::info("Not removed");
-            return Ok(());
-        }
+    if !force
+        && !crate::yes_mode()
+        && !crate::prompt_bool(&format!("Remove '{user}' from team '{team}'?"), false).await?
+    {
+        crate::output::info("Not removed");
+        return Ok(());
     }
 
     crate::verbose_log!("Removing {user} from team {team}");

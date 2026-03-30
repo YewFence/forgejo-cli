@@ -1,0 +1,10 @@
+---
+source: tests/cli_help.rs
+expression: stdout
+---
+Usage: fj version [OPTIONS]
+
+Options:
+  -v, --verbose  
+  -y, --yes      Skip all confirmation prompts (auto-confirm destructive actions)
+  -h, --help     Print help

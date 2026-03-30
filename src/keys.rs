@@ -3,9 +3,24 @@ use forgejo_api::{Auth, Forgejo};
 use std::{
     collections::{BTreeMap, BTreeSet},
     io::ErrorKind,
+    path::PathBuf,
 };
 use tokio::io::AsyncWriteExt;
 use url::Url;
+
+/// Return the data directory for storing keys.json.
+///
+/// Respects `FJ_DATA_DIR` env var if set (useful for testing), otherwise
+/// falls back to the platform-specific data directory.
+fn data_dir() -> eyre::Result<PathBuf> {
+    if let Ok(dir) = std::env::var("FJ_DATA_DIR") {
+        return Ok(PathBuf::from(dir));
+    }
+    Ok(directories::ProjectDirs::from("", "Cyborus", "forgejo-cli")
+        .ok_or_else(|| eyre!("Could not find data directory"))?
+        .data_dir()
+        .to_path_buf())
+}
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Default)]
 pub struct KeyInfo {
@@ -18,10 +33,7 @@ pub struct KeyInfo {
 
 impl KeyInfo {
     pub async fn load() -> eyre::Result<Self> {
-        let path = directories::ProjectDirs::from("", "Cyborus", "forgejo-cli")
-            .ok_or_else(|| eyre!("Could not find data directory"))?
-            .data_dir()
-            .join("keys.json");
+        let path = data_dir()?.join("keys.json");
         let json = tokio::fs::read(path).await;
         let this = match json {
             Ok(x) => serde_json::from_slice::<Self>(&x)?,
@@ -36,11 +48,9 @@ impl KeyInfo {
 
     pub async fn save(&self) -> eyre::Result<()> {
         let json = serde_json::to_vec_pretty(self)?;
-        let dirs = directories::ProjectDirs::from("", "Cyborus", "forgejo-cli")
-            .ok_or_else(|| eyre!("Could not find data directory"))?;
-        let path = dirs.data_dir();
+        let path = data_dir()?;
 
-        tokio::fs::create_dir_all(path).await?;
+        tokio::fs::create_dir_all(&path).await?;
 
         let mut file = tokio::fs::File::create(path.join("keys.json")).await?;
         #[cfg(unix)]
@@ -68,7 +78,10 @@ impl KeyInfo {
                 login.api_for(url).await
             }
             None => {
-                crate::verbose_log!("No saved login for {}, using unauthenticated access", crate::host_name(url));
+                crate::verbose_log!(
+                    "No saved login for {}, using unauthenticated access",
+                    crate::host_name(url)
+                );
                 Forgejo::with_user_agent(Auth::None, url.clone(), crate::USER_AGENT)
                     .map_err(Into::into)
             }
@@ -156,5 +169,41 @@ impl LoginInfo {
                 Ok(api)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_key_info(aliases: Vec<(&str, &str)>) -> KeyInfo {
+        KeyInfo {
+            hosts: BTreeMap::new(),
+            aliases: aliases
+                .into_iter()
+                .map(|(k, v)| (k.to_owned(), v.to_owned()))
+                .collect(),
+            default_ssh: BTreeSet::new(),
+        }
+    }
+
+    #[test]
+    fn deref_alias_rewrites_matching_host() {
+        // In practice, aliases map ssh_host_name -> http_host_name using
+        // crate::host_name() which returns "host" for base URLs like
+        // "https://host/". The replacement value is also a host_name string.
+        let keys = make_key_info(vec![("myalias.local", "codeberg.org")]);
+        let url = Url::parse("https://myalias.local/").unwrap();
+        let result = keys.deref_alias(url);
+        assert_eq!(result.host_str().unwrap(), "codeberg.org");
+        assert_eq!(result.scheme(), "https");
+    }
+
+    #[test]
+    fn deref_alias_no_match_returns_original() {
+        let keys = make_key_info(vec![("other.local", "codeberg.org")]);
+        let url = Url::parse("https://git.example.com/").unwrap();
+        let result = keys.deref_alias(url.clone());
+        assert_eq!(result, url);
     }
 }
