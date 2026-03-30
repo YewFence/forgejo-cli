@@ -5,6 +5,6 @@ expression: stdout
 Usage: fj version [OPTIONS]
 
 Options:
-  -v, --verbose  
   -y, --yes      Skip all confirmation prompts (auto-confirm destructive actions)
+  -v, --verbose  Show verbose output (API calls, resolution steps)
   -h, --help     Print help

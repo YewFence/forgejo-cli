@@ -30,7 +30,6 @@ fn issue_view_no_remote_gives_helpful_error() {
 }
 
 #[test]
-#[ignore = "panics in debug builds: -v short flag conflict between visibility and verbose (works in release)"]
 fn completion_generates_output() {
     fj().args(["completion", "bash"])
         .assert()
