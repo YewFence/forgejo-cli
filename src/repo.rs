@@ -338,6 +338,7 @@ impl std::fmt::Display for RepoArgError {
 
 #[derive(Args, Clone, Debug)]
 pub struct RepoCreateArgs {
+    /// Repository name, or org/name to create under an organization
     pub repo: String,
 
     // flags
@@ -494,7 +495,37 @@ impl RepoCommand {
                 let ssh = ssh
                     .unwrap_or_else(|| Some(keys.default_ssh.contains(url_host)))
                     .unwrap_or(true);
-                create_repo(&api, None, repo, description, private, remote, push, ssh).await?;
+
+                let (org, repo_name) = match repo.split_once('/') {
+                    Some((owner, name))
+                        if owner.is_empty() || name.is_empty() || name.contains('/') =>
+                    {
+                        eyre::bail!(
+                            "invalid repo format '{repo}': expected 'owner/name' or 'name'"
+                        );
+                    }
+                    Some((owner, name)) => {
+                        let current_user = api.user_get_current().await?;
+                        let username = current_user
+                            .login
+                            .as_deref()
+                            .ok_or_eyre("current user does not have login")?;
+                        if owner.eq_ignore_ascii_case(username) {
+                            crate::verbose_log!(
+                                "Owner '{}' matches current user, creating under user account",
+                                owner
+                            );
+                            (None, name.to_string())
+                        } else {
+                            crate::verbose_log!("Creating repo under org '{}'", owner);
+                            (Some(owner.to_string()), name.to_string())
+                        }
+                    }
+                    None => (None, repo),
+                };
+
+                create_repo(&api, org, repo_name, description, private, remote, push, ssh)
+                    .await?;
             }
             RepoCommand::Fork { repo, name, remote } => {
                 fn strip(s: &str) -> &str {
