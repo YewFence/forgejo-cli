@@ -330,7 +330,7 @@ Many commands accept either numeric IDs or names. The CLI tries numeric ID first
 
 When run inside a git repo, `fj` auto-detects the Forgejo instance and repo from git remotes. Use `-R, --remote` to pick a specific remote, or `-r, --repo owner/repo` for cross-repo operations, or `-H, --host` to target a specific instance.
 
-**`--repo` is NOT available on all commands.** `issue view`, `issue edit`, `pr view`, `pr edit` only have `--remote` (local git remote name). For these commands, run from inside a local clone with the correct remote. `issue search`, `issue create`, `pr search`, `pr create` do support `--repo`.
+**`--repo` is NOT available on all commands.** `issue view`, `issue edit`, `pr view`, `pr edit` only have `--remote` (local git remote name). They infer the repo from the current directory's git remote -- no cloning needed if you're already in the repo directory. `issue search`, `issue create`, `pr search`, `pr create` do support `--repo`.
 
 ## Output Parsing
 
