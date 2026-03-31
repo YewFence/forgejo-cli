@@ -55,6 +55,7 @@ fj --json issue search -r owner/repo -a username -s all
 
 # View
 fj --json issue view 42
+fj --json issue view 42 -r owner/repo      # Cross-repo view
 fj issue view 42 comments                  # All comments
 fj issue view 42 comment 3                 # Specific comment
 
@@ -138,7 +139,8 @@ fj pr browse 10                              # Open in browser
 ### Repositories
 
 ```bash
-fj repo create myrepo -d "Description" -p   # Private
+fj repo create myrepo -d "Description" -p   # Private (under your account)
+fj repo create myorg/myrepo -d "Description"  # Create under an organization
 fj repo fork owner/repo --name my-fork
 fj repo migrate https://github.com/user/repo myrepo  # Mirror from other forges
 fj repo migrate https://github.com/user/repo myrepo -m  # As mirror (auto-sync)
@@ -152,8 +154,8 @@ fj --yes repo unstar
 fj --yes repo delete owner/repo --force      # Destructive
 
 # Labels
-fj --json repo labels view
-fj repo labels view --archived               # Include archived labels
+fj --json repo labels list
+fj repo labels list --archived               # Include archived labels
 fj repo labels create "bug" "#d73a4a" -d "Something isn't working"
 fj repo labels create "scope/api" "#0e8a16" -e  # Exclusive (scoped) label
 fj repo labels edit 5 -n "renamed" -c "#ff0000"
@@ -309,7 +311,7 @@ fj wiki browse "Home"                        # Open page in browser
 
 ```bash
 fj version                                   # Show version
-fj version -v                                # Verbose build info
+fj --verbose version                         # Verbose build info (user agent, target, etc.)
 fj completion bash > ~/.bash_completion.d/fj
 fj completion zsh > ~/.zfunc/_fj
 fj completion fish > ~/.config/fish/completions/fj.fish
@@ -330,7 +332,7 @@ Many commands accept either numeric IDs or names. The CLI tries numeric ID first
 
 When run inside a git repo, `fj` auto-detects the Forgejo instance and repo from git remotes. Use `-R, --remote` to pick a specific remote, or `-r, --repo owner/repo` for cross-repo operations, or `-H, --host` to target a specific instance.
 
-**`--repo` is NOT available on all commands.** `issue view`, `issue edit`, `pr view`, `pr edit` only have `--remote` (local git remote name). They infer the repo from the current directory's git remote -- no cloning needed if you're already in the repo directory. `issue search`, `issue create`, `pr search`, `pr create` do support `--repo`.
+**`--repo` (`-r`) is available on all issue and PR commands** -- view, edit, close, reopen, browse, comment, status, search, and create. Use `-R, --remote` to pick a specific local git remote instead.
 
 ## Output Parsing
 
