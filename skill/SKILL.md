@@ -153,8 +153,9 @@ fj --yes repo star
 fj --yes repo unstar
 fj --yes repo delete owner/repo --force      # Destructive
 
-# Labels
+# Labels (nested under `repo labels`, NOT top-level)
 fj --json repo labels list
+fj --json repo labels list -r owner/repo     # Cross-repo (requires -H if not in a git repo)
 fj repo labels list --archived               # Include archived labels
 fj repo labels create "bug" "#d73a4a" -d "Something isn't working"
 fj repo labels create "scope/api" "#0e8a16" -e  # Exclusive (scoped) label
@@ -310,7 +311,7 @@ fj wiki browse "Home"                        # Open page in browser
 ### Other
 
 ```bash
-fj version                                   # Show version
+fj --version                                 # Show version (also: fj version)
 fj --verbose version                         # Verbose build info (user agent, target, etc.)
 fj completion bash > ~/.bash_completion.d/fj
 fj completion zsh > ~/.zfunc/_fj
@@ -332,7 +333,9 @@ Many commands accept either numeric IDs or names. The CLI tries numeric ID first
 
 When run inside a git repo, `fj` auto-detects the Forgejo instance and repo from git remotes. Use `-R, --remote` to pick a specific remote, or `-r, --repo owner/repo` for cross-repo operations, or `-H, --host` to target a specific instance.
 
-**`--repo` (`-r`) is available on all issue and PR commands** -- view, edit, close, reopen, browse, comment, status, search, and create. Use `-R, --remote` to pick a specific local git remote instead.
+**`--repo` (`-r`) is available on all issue and PR commands** -- view, edit, close, reopen, browse, comment, status, search, and create. Also available on `repo labels` (as a parent-level flag). Use `-R, --remote` to pick a specific local git remote instead.
+
+**Outside a git repo**, you must pass `-H <host>` alongside `-r owner/repo` since there's no remote to infer the instance from.
 
 ## Output Parsing
 
