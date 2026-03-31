@@ -9,3 +9,4 @@ FORK_CONTEXT.md
 /.playwright-mcp
 /docs/plans
 /.claude/skills/build-release
+.DS_Store
