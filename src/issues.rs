@@ -62,6 +62,9 @@ pub enum IssueSubcommand {
     /// Edit an issue
     Edit {
         issue: IssueId,
+        /// The repo to operate on (alternative to owner/repo#id syntax)
+        #[clap(long, short = 'r')]
+        repo: Option<RepoArg>,
         #[clap(subcommand)]
         command: EditCommand,
     },
@@ -75,6 +78,9 @@ pub enum IssueSubcommand {
         /// The text content of the comment, to read from a file
         #[clap(long, conflicts_with = "body")]
         body_file: Option<PathBuf>,
+        /// The repo to operate on (alternative to owner/repo#id syntax)
+        #[clap(long, short = 'r')]
+        repo: Option<RepoArg>,
     },
     /// Close an issue
     Close {
@@ -82,6 +88,9 @@ pub enum IssueSubcommand {
         /// A comment to leave on the issue before closing it
         #[clap(long, short)]
         with_msg: Option<Option<String>>,
+        /// The repo to operate on (alternative to owner/repo#id syntax)
+        #[clap(long, short = 'r')]
+        repo: Option<RepoArg>,
     },
     /// Reopen a closed issue
     Reopen {
@@ -89,6 +98,9 @@ pub enum IssueSubcommand {
         /// A comment to leave on the issue before reopening it
         #[clap(long, short)]
         with_msg: Option<Option<String>>,
+        /// The repo to operate on (alternative to owner/repo#id syntax)
+        #[clap(long, short = 'r')]
+        repo: Option<RepoArg>,
     },
     /// Search for an issue in a repo
     Search {
@@ -112,6 +124,9 @@ pub enum IssueSubcommand {
     /// View an issue's info
     View {
         id: IssueId,
+        /// The repo to operate on (alternative to owner/repo#id syntax)
+        #[clap(long, short = 'r')]
+        repo: Option<RepoArg>,
         #[clap(subcommand)]
         command: Option<ViewCommand>,
     },
@@ -122,7 +137,12 @@ pub enum IssueSubcommand {
         repo: Option<RepoArg>,
     },
     /// Open an issue in your browser
-    Browse { id: IssueId },
+    Browse {
+        id: IssueId,
+        /// The repo to operate on (alternative to owner/repo#id syntax)
+        #[clap(long, short = 'r')]
+        repo: Option<RepoArg>,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -265,7 +285,11 @@ impl IssueCommand {
                 )
                 .await?
             }
-            View { id, command } => match command.unwrap_or(ViewCommand::Body) {
+            View {
+                id,
+                command,
+                repo: _,
+            } => match command.unwrap_or(ViewCommand::Body) {
                 ViewCommand::Body => view_issue(repo, &api, id.number).await?,
                 ViewCommand::Comment { idx } => view_comment(repo, &api, id.number, idx).await?,
                 ViewCommand::Comments => view_comments(repo, &api, id.number).await?,
@@ -285,7 +309,11 @@ impl IssueCommand {
                 .await?
             }
             Templates { .. } => view_issue_templates(repo, &api).await?,
-            Edit { issue, command } => match command {
+            Edit {
+                issue,
+                command,
+                repo: _,
+            } => match command {
                 EditCommand::Title { new_title } => {
                     edit_title(repo, &api, issue.number, new_title).await?
                 }
@@ -302,13 +330,22 @@ impl IssueCommand {
                     edit_assignees(repo, &api, issue.number, add, rm).await?;
                 }
             },
-            Close { issue, with_msg } => close_issue(repo, &api, issue.number, with_msg).await?,
-            Reopen { issue, with_msg } => reopen_issue(repo, &api, issue.number, with_msg).await?,
-            Browse { id } => browse_issue(repo, &api, id.number).await?,
+            Close {
+                issue,
+                with_msg,
+                repo: _,
+            } => close_issue(repo, &api, issue.number, with_msg).await?,
+            Reopen {
+                issue,
+                with_msg,
+                repo: _,
+            } => reopen_issue(repo, &api, issue.number, with_msg).await?,
+            Browse { id, repo: _ } => browse_issue(repo, &api, id.number).await?,
             Comment {
                 issue,
                 body,
                 body_file,
+                repo: _,
             } => add_comment(repo, &api, issue.number, body, body_file).await?,
         }
         Ok(())
@@ -318,12 +355,16 @@ impl IssueCommand {
         use IssueSubcommand::*;
         match &self.command {
             Create { repo, .. } | Search { repo, .. } | Templates { repo } => repo.as_ref(),
-            View { id: issue, .. }
-            | Edit { issue, .. }
-            | Close { issue, .. }
-            | Reopen { issue, .. }
-            | Comment { issue, .. }
-            | Browse { id: issue, .. } => issue.repo.as_ref(),
+            View {
+                repo, id: issue, ..
+            }
+            | Edit { repo, issue, .. }
+            | Close { repo, issue, .. }
+            | Reopen { repo, issue, .. }
+            | Comment { repo, issue, .. }
+            | Browse {
+                repo, id: issue, ..
+            } => repo.as_ref().or(issue.repo.as_ref()),
         }
     }
 
@@ -339,7 +380,7 @@ impl IssueCommand {
             | Reopen { issue, .. }
             | Comment { issue, .. }
             | Browse { id: issue, .. } => eyre::eyre!(
-                "can't figure out what repo to access, try specifying with `{{owner}}/{{repo}}#{}`",
+                "can't figure out what repo to access, try specifying with `--repo` or `{{owner}}/{{repo}}#{}`",
                 issue.number
             ),
         }
@@ -617,7 +658,7 @@ async fn view_issues(
         .map(|s| s.split(',').map(|s| s.to_string()).collect::<Vec<_>>())
         .unwrap_or_default();
     let query = forgejo_api::structs::IssueListIssuesQuery {
-        q: query_str,
+        q: query_str.clone(),
         labels: Some(labels.join(",")),
         created_by: creator,
         assigned_by: assignee,
@@ -633,6 +674,31 @@ async fn view_issues(
         .issue_list_issues(repo.owner(), repo.name(), query)
         .all()
         .await?;
+    // Client-side filtering: the Forgejo API `q` parameter is unreliable on
+    // some instances (especially large repos), so we filter results locally
+    // to ensure only matching issues are shown.
+    let issues: Vec<_> = if let Some(ref q) = query_str {
+        let q_lower = q.to_lowercase();
+        issues
+            .into_iter()
+            .filter(|issue| {
+                issue
+                    .title
+                    .as_deref()
+                    .unwrap_or("")
+                    .to_lowercase()
+                    .contains(&q_lower)
+                    || issue
+                        .body
+                        .as_deref()
+                        .unwrap_or("")
+                        .to_lowercase()
+                        .contains(&q_lower)
+            })
+            .collect()
+    } else {
+        issues
+    };
     crate::output::print_list(
         &issues,
         &["ID", "STATE", "TITLE", "LABELS", "ASSIGNEE", "AGE"],

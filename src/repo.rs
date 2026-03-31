@@ -476,6 +476,8 @@ pub enum RepoCommand {
     /// Manage a repo's issue labels
     #[clap(alias = "label")]
     Labels {
+        /// The repo whose labels to manage
+        #[clap(long, short = 'r')]
         repo: Option<RepoArg>,
 
         #[clap(subcommand)]
@@ -678,7 +680,7 @@ impl RepoCommand {
             }
             RepoCommand::Labels {
                 repo,
-                cmd: LabelsSubcommand::View { archived },
+                cmd: LabelsSubcommand::List { archived },
             } => {
                 let repo = RepoInfo::get_current(host_name, repo.as_ref(), None, keys)?;
                 let api = keys.get_api(repo.host_url()).await?;
@@ -755,8 +757,9 @@ impl RepoCommand {
 
 #[derive(Subcommand, Clone, Debug)]
 pub enum LabelsSubcommand {
-    /// Show a repo's labels
-    View {
+    /// List a repo's labels
+    #[clap(alias = "view")]
+    List {
         /// Show archived labels
         #[clap(short, long)]
         archived: bool,

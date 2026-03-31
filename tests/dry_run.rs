@@ -11,7 +11,7 @@ use rstest::rstest;
 #[case(&["milestone", "--repo", "alice/repo", "delete", "sprint-1", "--dry-run"])]
 #[case(&["actions", "--repo", "alice/repo", "variables", "delete", "MY_VAR", "--dry-run"])]
 #[case(&["actions", "--repo", "alice/repo", "secrets", "delete", "MY_SECRET", "--dry-run"])]
-#[case(&["repo", "labels", "alice/repo", "delete", "bug", "--dry-run"])]
+#[case(&["repo", "labels", "--repo", "alice/repo", "delete", "bug", "--dry-run"])]
 #[case(&["org", "label", "rm", "my-org", "my-label", "--dry-run"])]
 #[case(&["org", "team", "delete", "my-org", "my-team", "--dry-run"])]
 #[case(&["org", "team", "repo", "rm", "my-org", "my-team", "my-repo", "--dry-run"])]

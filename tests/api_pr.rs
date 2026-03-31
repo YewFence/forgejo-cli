@@ -552,3 +552,74 @@ async fn pr_comment() {
         .success()
         .stderr(predicate::str::contains("Added comment on issue #1"));
 }
+
+/// Verify that client-side filtering removes PRs not matching the query,
+/// even if the server returns them (simulating broken server-side `q` param).
+#[tokio::test]
+async fn pr_search_filters_by_query_client_side() {
+    let instance = common::TestInstance::start().await;
+
+    let make_pr_issue = |id: u64, number: u64, title: &str, body: &str| {
+        serde_json::json!({
+            "id": id,
+            "number": number,
+            "title": title,
+            "body": body,
+            "state": "open",
+            "html_url": format!("https://example.com/alice/repo/pulls/{number}"),
+            "url": format!("https://example.com/api/v1/repos/alice/repo/issues/{number}"),
+            "comments": 0,
+            "created_at": "2024-01-15T10:00:00Z",
+            "updated_at": "2024-01-15T12:00:00Z",
+            "closed_at": null,
+            "due_date": null,
+            "user": mock_user_obj(),
+            "labels": [],
+            "assignees": [],
+            "milestone": null,
+            "assignee": null,
+            "pull_request": {
+                "merged": false,
+                "merged_at": null,
+                "draft": false,
+                "html_url": format!("https://example.com/alice/repo/pulls/{number}")
+            },
+            "repository": null,
+            "assets": [],
+            "ref": "",
+            "original_author": "",
+            "original_author_id": 0,
+            "pin_order": 0,
+            "is_locked": false
+        })
+    };
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/alice/repo/issues"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!([
+                    make_pr_issue(1, 1, "Fix auth token refresh", "Token refresh was broken"),
+                    make_pr_issue(2, 2, "Add dark mode", "Implements dark theme"),
+                ]))
+                .insert_header("x-total-count", "2"),
+        )
+        .mount(&instance.server)
+        .await;
+
+    let assert = instance
+        .fj()
+        .args(["--json", "pr", "search", "--repo", "alice/repo", "token"])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert!(
+        stdout.contains("Fix auth token refresh"),
+        "matching PR should be in output:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("Add dark mode"),
+        "non-matching PR should be filtered out:\n{stdout}"
+    );
+}

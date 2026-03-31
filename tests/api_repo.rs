@@ -292,7 +292,15 @@ async fn label_delete_force() {
 
     instance
         .fj()
-        .args(["repo", "labels", "alice/repo", "delete", "bug", "--force"])
+        .args([
+            "repo",
+            "labels",
+            "--repo",
+            "alice/repo",
+            "delete",
+            "bug",
+            "--force",
+        ])
         .assert()
         .success()
         .stderr(predicate::str::contains("Deleted label bug"));
@@ -333,6 +341,7 @@ async fn label_edit() {
         .args([
             "repo",
             "labels",
+            "--repo",
             "alice/repo",
             "edit",
             "bug",

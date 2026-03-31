@@ -96,6 +96,9 @@ pub enum PrSubcommand {
     View {
         /// The pull request to view.
         id: Option<IssueId>,
+        /// The repo to operate on (alternative to owner/repo#id syntax)
+        #[clap(long, short = 'r')]
+        repo: Option<RepoArg>,
         #[clap(subcommand)]
         command: Option<ViewCommand>,
     },
@@ -106,6 +109,9 @@ pub enum PrSubcommand {
         /// Wait for all checks to finish before exiting
         #[clap(long)]
         wait: bool,
+        /// The repo to operate on (alternative to owner/repo#id syntax)
+        #[clap(long, short = 'r')]
+        repo: Option<RepoArg>,
     },
     /// Checkout a pull request in a new branch
     Checkout {
@@ -137,11 +143,17 @@ pub enum PrSubcommand {
         /// The text content of the comment, to read from a file
         #[clap(long, conflicts_with = "body")]
         body_file: Option<PathBuf>,
+        /// The repo to operate on (alternative to owner/repo#id syntax)
+        #[clap(long, short = 'r')]
+        repo: Option<RepoArg>,
     },
     /// Edit the contents of a pull request
     Edit {
         /// The pull request to edit.
         pr: Option<IssueId>,
+        /// The repo to operate on (alternative to owner/repo#id syntax)
+        #[clap(long, short = 'r')]
+        repo: Option<RepoArg>,
         #[clap(subcommand)]
         command: EditCommand,
     },
@@ -154,6 +166,9 @@ pub enum PrSubcommand {
         /// Adding without an argument will open your editor
         #[clap(long, short)]
         with_msg: Option<Option<String>>,
+        /// The repo to operate on (alternative to owner/repo#id syntax)
+        #[clap(long, short = 'r')]
+        repo: Option<RepoArg>,
     },
     /// Reopen a closed pull request.
     Reopen {
@@ -164,6 +179,9 @@ pub enum PrSubcommand {
         /// Adding without an argument will open your editor
         #[clap(long, short)]
         with_msg: Option<Option<String>>,
+        /// The repo to operate on (alternative to owner/repo#id syntax)
+        #[clap(long, short = 'r')]
+        repo: Option<RepoArg>,
     },
     /// Merge a pull request
     Merge {
@@ -181,11 +199,17 @@ pub enum PrSubcommand {
         /// The body of the merge or squash commit to be created
         #[clap(long, short)]
         message: Option<Option<String>>,
+        /// The repo to operate on (alternative to owner/repo#id syntax)
+        #[clap(long, short = 'r')]
+        repo: Option<RepoArg>,
     },
     /// Open a pull request in your browser
     Browse {
         /// The pull request to open in your browser.
         id: Option<IssueId>,
+        /// The repo to operate on (alternative to owner/repo#id syntax)
+        #[clap(long, short = 'r')]
+        repo: Option<RepoArg>,
     },
 }
 
@@ -359,6 +383,7 @@ impl PrCommand {
                 delete,
                 title,
                 message,
+                repo: _,
             } => {
                 merge_pr(
                     repo,
@@ -371,7 +396,11 @@ impl PrCommand {
                 )
                 .await?
             }
-            View { id, command } => {
+            View {
+                id,
+                command,
+                repo: _,
+            } => {
                 let id = id.map(|id| id.number);
                 match command.unwrap_or(ViewCommand::Body) {
                     ViewCommand::Body => view_pr(repo, &api, id).await?,
@@ -393,7 +422,9 @@ impl PrCommand {
                     }
                 }
             }
-            Status { id, wait } => view_pr_status(repo, &api, id.map(|id| id.number), wait).await?,
+            Status { id, wait, repo: _ } => {
+                view_pr_status(repo, &api, id.map(|id| id.number), wait).await?
+            }
             Search {
                 query,
                 labels,
@@ -408,7 +439,11 @@ impl PrCommand {
                 )
                 .await?
             }
-            Edit { pr, command } => {
+            Edit {
+                pr,
+                command,
+                repo: _,
+            } => {
                 let pr = pr.map(|pr| pr.number);
                 match command {
                     EditCommand::Title { new_title } => {
@@ -432,11 +467,19 @@ impl PrCommand {
                     }
                 }
             }
-            Close { pr, with_msg } => {
+            Close {
+                pr,
+                with_msg,
+                repo: _,
+            } => {
                 let (repo, pr) = try_get_pr_number(repo, &api, pr.map(|pr| pr.number)).await?;
                 crate::issues::close_issue(&repo, &api, pr, with_msg).await?
             }
-            Reopen { pr, with_msg } => {
+            Reopen {
+                pr,
+                with_msg,
+                repo: _,
+            } => {
                 let (repo, pr) = try_get_pr_number(repo, &api, pr.map(|pr| pr.number)).await?;
                 crate::issues::reopen_issue(&repo, &api, pr, with_msg).await?
             }
@@ -452,7 +495,7 @@ impl PrCommand {
                     .unwrap_or(true);
                 checkout_pr(repo, &api, pr, branch_name, ssh, identity).await?
             }
-            Browse { id } => {
+            Browse { id, repo: _ } => {
                 let (repo, id) = try_get_pr_number(repo, &api, id.map(|pr| pr.number)).await?;
                 browse_pr(&repo, &api, id).await?
             }
@@ -460,6 +503,7 @@ impl PrCommand {
                 pr,
                 body,
                 body_file,
+                repo: _,
             } => {
                 let (repo, pr) = try_get_pr_number(repo, &api, pr.map(|pr| pr.number)).await?;
                 crate::issues::add_comment(&repo, &api, pr, body, body_file).await?
@@ -473,14 +517,16 @@ impl PrCommand {
         match &self.command {
             Search { repo, .. } | Create { repo, .. } => repo.as_ref(),
             Checkout { .. } => None,
-            View { id: pr, .. }
-            | Status { id: pr, .. }
-            | Comment { pr, .. }
-            | Edit { pr, .. }
-            | Close { pr, .. }
-            | Reopen { pr, .. }
-            | Merge { pr, .. }
-            | Browse { id: pr } => pr.as_ref().and_then(|x| x.repo.as_ref()),
+            View { repo, id: pr, .. }
+            | Status { repo, id: pr, .. }
+            | Comment { repo, pr, .. }
+            | Edit { repo, pr, .. }
+            | Close { repo, pr, .. }
+            | Reopen { repo, pr, .. }
+            | Merge { repo, pr, .. }
+            | Browse { repo, id: pr, .. } => {
+                repo.as_ref().or(pr.as_ref().and_then(|x| x.repo.as_ref()))
+            }
         }
     }
 
@@ -506,11 +552,11 @@ impl PrCommand {
             | Merge { pr, .. }
             | Browse { id: pr, .. } => match pr {
                 Some(pr) => eyre::eyre!(
-                    "can't figure out what repo to access, try specifying with `{{owner}}/{{repo}}#{}`",
+                    "can't figure out what repo to access, try specifying with `--repo` or `{{owner}}/{{repo}}#{}`",
                     pr.number
                     ),
                 None => eyre::eyre!(
-                    "can't figure out what repo to access, try specifying with `{{owner}}/{{repo}}#{{pr}}`",
+                    "can't figure out what repo to access, try specifying with `--repo` or `{{owner}}/{{repo}}#{{pr}}`",
                     ),
             },
         }
@@ -1535,7 +1581,7 @@ async fn view_prs(
         .map(|s| s.split(',').map(|s| s.to_string()).collect::<Vec<_>>())
         .unwrap_or_default();
     let query = forgejo_api::structs::IssueListIssuesQuery {
-        q: query_str,
+        q: query_str.clone(),
         labels: Some(labels.join(",")),
         created_by: creator,
         assigned_by: assignee,
@@ -1551,6 +1597,29 @@ async fn view_prs(
         .issue_list_issues(repo.owner(), repo.name(), query)
         .all()
         .await?;
+    // Client-side filtering: the Forgejo API `q` parameter is unreliable on
+    // some instances (especially large repos), so we filter results locally
+    // to ensure only matching PRs are shown.
+    let prs: Vec<_> = if let Some(ref q) = query_str {
+        let q_lower = q.to_lowercase();
+        prs.into_iter()
+            .filter(|pr| {
+                pr.title
+                    .as_deref()
+                    .unwrap_or("")
+                    .to_lowercase()
+                    .contains(&q_lower)
+                    || pr
+                        .body
+                        .as_deref()
+                        .unwrap_or("")
+                        .to_lowercase()
+                        .contains(&q_lower)
+            })
+            .collect()
+    } else {
+        prs
+    };
     crate::output::print_list(
         &prs,
         &["ID", "STATE", "TITLE", "LABELS", "ASSIGNEE", "AGE"],

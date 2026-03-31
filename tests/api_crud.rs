@@ -204,7 +204,15 @@ async fn label_create() {
 
     instance
         .fj()
-        .args(["repo", "labels", "alice/repo", "create", "bug", "ee0701"])
+        .args([
+            "repo",
+            "labels",
+            "--repo",
+            "alice/repo",
+            "create",
+            "bug",
+            "ee0701",
+        ])
         .assert()
         .success()
         .stderr(predicate::str::contains("Created label"));
@@ -305,7 +313,7 @@ async fn label_list() {
 
     instance
         .fj()
-        .args(["repo", "labels", "alice/repo", "view"])
+        .args(["repo", "labels", "--repo", "alice/repo", "list"])
         .assert()
         .success()
         .stdout(predicate::str::contains("bug"))

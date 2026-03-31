@@ -35,6 +35,7 @@ pub const USER_AGENT: &str = concat!(
 );
 
 #[derive(Parser, Debug)]
+#[command(version)]
 pub struct App {
     #[clap(long, short = 'H')]
     host: Option<String>,
