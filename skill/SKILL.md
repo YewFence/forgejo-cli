@@ -43,9 +43,10 @@ fj whoami                        # Current user@instance
 ### Issues
 
 ```bash
-# Create
+# Create (title is positional, NOT --title)
 fj issue create "Title" --body "Description" -r owner/repo
 fj issue create --template bug              # Use issue template
+fj issue create --no-template "Title" --body "..." -r owner/repo  # Repos with templates require --template or --no-template
 
 # Search/list
 fj --json issue search -r owner/repo -s open
@@ -328,6 +329,8 @@ Many commands accept either numeric IDs or names. The CLI tries numeric ID first
 ## Repo Context
 
 When run inside a git repo, `fj` auto-detects the Forgejo instance and repo from git remotes. Use `-R, --remote` to pick a specific remote, or `-r, --repo owner/repo` for cross-repo operations, or `-H, --host` to target a specific instance.
+
+**`--repo` is NOT available on all commands.** `issue view`, `issue edit`, `pr view`, `pr edit` only have `--remote` (local git remote name). For these commands, run from inside a local clone with the correct remote. `issue search`, `issue create`, `pr search`, `pr create` do support `--repo`.
 
 ## Output Parsing
 
