@@ -938,10 +938,26 @@ async fn create_pr(
                 .shorthand()
                 .ok_or_eyre("current branch does not have utf8 name")?;
 
-            let remote_name = config.get_string(&format!("branch.{branch_shorthand}.remote"))?;
+            let tracking_remote = config
+                .get_string(&format!("branch.{branch_shorthand}.remote"))
+                .ok();
+
+            let resolved_remote_name = tracking_remote
+                .as_deref()
+                .or(remote_name)
+                .unwrap_or("origin");
+
+            if tracking_remote.is_none() {
+                crate::verbose_log!(
+                    "Branch '{}' has no tracking remote, using '{}'",
+                    branch_shorthand,
+                    resolved_remote_name
+                );
+            }
+
             let remote_url = crate::ssh_url_parse(
                 local_repo
-                    .find_remote(&remote_name)?
+                    .find_remote(resolved_remote_name)?
                     .url()
                     .ok_or_eyre("remote does not have utf8 url")?,
             )?;
@@ -967,14 +983,14 @@ async fn create_pr(
                 remote_host,
             );
 
-            let remote_head_name =
-                config.get_string(&format!("branch.{branch_shorthand}.merge"))?;
-            Some(
-                remote_head_name
-                    .strip_prefix("refs/heads/")
-                    .unwrap_or(&remote_head_name)
-                    .to_owned(),
-            )
+            // If the branch has tracking info, use the remote branch name;
+            // otherwise fall back to the local branch name.
+            let head_name = config
+                .get_string(&format!("branch.{branch_shorthand}.merge"))
+                .ok()
+                .map(|name| name.strip_prefix("refs/heads/").unwrap_or(&name).to_owned())
+                .unwrap_or_else(|| branch_shorthand.to_owned());
+            Some(head_name)
         }
     };
 

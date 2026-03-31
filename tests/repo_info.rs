@@ -56,6 +56,14 @@ fn init_repo_with_remote(
     remote_name: &str,
     remote_url: &str,
 ) -> (tempfile::TempDir, std::path::PathBuf) {
+    init_repo_with_remotes(&[(remote_name, remote_url)])
+}
+
+/// Create a temp dir with a git repo and multiple remotes.
+///
+/// Returns the `TempDir` (must be kept alive for the duration of the test)
+/// and the path to the repo.
+fn init_repo_with_remotes(remotes: &[(&str, &str)]) -> (tempfile::TempDir, std::path::PathBuf) {
     let tmp = tempfile::tempdir().expect("failed to create temp dir");
     let repo_path = tmp.path().to_path_buf();
 
@@ -70,8 +78,9 @@ fn init_repo_with_remote(
             .unwrap();
     }
 
-    repo.remote(remote_name, remote_url)
-        .expect("failed to add remote");
+    for (name, url) in remotes {
+        repo.remote(name, url).expect("failed to add remote");
+    }
 
     (tmp, repo_path)
 }
@@ -361,4 +370,104 @@ async fn verbose_shows_repo_resolution() {
         stderr.contains("heidi/verbose-test"),
         "expected verbose output to contain repo name, got: {stderr}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Test 10: Multiple remotes fall back to "origin"
+//
+// When the repo has both "origin" and "upstream" remotes and the current
+// branch does not track any remote, fj should fall back to "origin"
+// instead of erroring with "no repo info specified".
+// Regression test for issue #44.
+// ---------------------------------------------------------------------------
+#[tokio::test]
+async fn multiple_remotes_falls_back_to_origin() {
+    let instance = common::TestInstance::start().await;
+    let server_url = instance.server.uri();
+
+    let origin_url = format!("{}/alice/my-fork.git", server_url);
+    let upstream_url = "https://other-host.example.com/upstream/original.git";
+    let (_tmp, repo_path) =
+        init_repo_with_remotes(&[("origin", &origin_url), ("upstream", upstream_url)]);
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/alice/my-fork"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(repo_json("alice", "my-fork")))
+        .expect(1)
+        .mount(&instance.server)
+        .await;
+
+    instance
+        .fj()
+        .current_dir(&repo_path)
+        .args(["repo", "view"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("alice/my-fork"));
+}
+
+// ---------------------------------------------------------------------------
+// Test 11: Multiple remotes with --host resolves via host matching
+//
+// When --host is provided and matches a remote, that remote is used via
+// host matching (which takes priority over the origin fallback). Verbose
+// output should show the resolved repo.
+// ---------------------------------------------------------------------------
+#[tokio::test]
+async fn multiple_remotes_with_host_resolves_via_host_matching() {
+    let instance = common::TestInstance::start().await;
+    let server_url = instance.server.uri();
+
+    let origin_url = format!("{}/alice/verbose-fork.git", server_url);
+    let upstream_url = "https://other-host.example.com/upstream/original.git";
+    let (_tmp, repo_path) =
+        init_repo_with_remotes(&[("origin", &origin_url), ("upstream", upstream_url)]);
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/alice/verbose-fork"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(repo_json("alice", "verbose-fork")))
+        .mount(&instance.server)
+        .await;
+
+    let output = instance
+        .fj()
+        .current_dir(&repo_path)
+        .args(["--verbose", "repo", "view"])
+        .output()
+        .expect("failed to run fj");
+
+    assert!(output.status.success(), "command failed: {:?}", output);
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("alice/verbose-fork"),
+        "expected verbose output to contain repo name, got: {stderr}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Test 12: Multiple remotes without "origin" still errors
+//
+// If there are multiple remotes but none named "origin", the fallback
+// should not apply and fj should still error.
+// ---------------------------------------------------------------------------
+#[tokio::test]
+async fn multiple_remotes_without_origin_errors() {
+    let instance = common::TestInstance::start().await;
+
+    let fork_url = "https://host-a.example.com/alice/fork.git";
+    let upstream_url = "https://host-b.example.com/bob/upstream.git";
+    let (_tmp, repo_path) =
+        init_repo_with_remotes(&[("myfork", fork_url), ("upstream", upstream_url)]);
+
+    instance
+        .fj()
+        .current_dir(&repo_path)
+        .args(["repo", "view"])
+        .assert()
+        .failure()
+        .stderr(
+            predicate::str::contains("no repo info specified")
+                .or(predicate::str::contains("couldn't get repo name")),
+        );
 }

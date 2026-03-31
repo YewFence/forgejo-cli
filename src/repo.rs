@@ -146,6 +146,17 @@ impl RepoInfo {
                     }
                 }
 
+                // if there are multiple remotes and nothing matched yet,
+                // fall back to "origin" -- this is the conventional default
+                // remote, matching behavior of git push, gh, etc.
+                if name.is_none() {
+                    let all_remotes = local_repo.remotes()?;
+                    if all_remotes.iter().any(|r| r == Some("origin")) {
+                        name = Some("origin".to_owned());
+                        crate::verbose_log!("Multiple remotes found, falling back to 'origin'");
+                    }
+                }
+
                 if let Some(name) = name {
                     if let Ok(remote) = local_repo.find_remote(&name) {
                         let url_s = std::str::from_utf8(remote.url_bytes())?;

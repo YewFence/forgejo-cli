@@ -1,7 +1,7 @@
 mod common;
 
 use predicates::prelude::*;
-use wiremock::matchers::{method, path, path_regex};
+use wiremock::matchers::{body_partial_json, method, path, path_regex};
 use wiremock::{Mock, ResponseTemplate};
 
 // ---------------------------------------------------------------------------
@@ -330,6 +330,108 @@ async fn pr_create() {
             "Test PR",
             "--body",
             "PR body",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Created PR"));
+}
+
+/// PR create from an untracked branch with multiple remotes.
+/// The branch has no tracking remote set, so `fj` must fall back to the
+/// resolved remote (origin) for host validation and use the local branch
+/// name as the head branch.
+/// Regression test for issue #46.
+#[tokio::test]
+async fn pr_create_untracked_branch() {
+    let instance = common::TestInstance::start().await;
+    let server_url = instance.server.uri();
+
+    // Create a repo with origin pointing at the mock server + a second remote
+    let tmp = tempfile::tempdir().expect("failed to create temp dir");
+    let repo_path = tmp.path().to_path_buf();
+    let repo = git2::Repository::init(&repo_path).expect("failed to init git repo");
+
+    // Initial commit on main so HEAD exists
+    {
+        let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+        let tree_id = repo.index().unwrap().write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "initial commit", &tree, &[])
+            .unwrap();
+    }
+
+    // Add two remotes -- origin at mock server, upstream elsewhere
+    repo.remote("origin", &format!("{}/alice/repo.git", server_url))
+        .unwrap();
+    repo.remote(
+        "upstream",
+        "https://other-host.example.com/upstream/repo.git",
+    )
+    .unwrap();
+
+    // Create a feature branch (no tracking remote)
+    let head_commit = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.branch("feature-branch", &head_commit, false).unwrap();
+    repo.set_head("refs/heads/feature-branch").unwrap();
+
+    // Mock repo_get -- clone_url must match the mock server host
+    let mut repo_obj = mock_repo_obj("alice", "repo");
+    repo_obj["clone_url"] = serde_json::json!(format!("{}/alice/repo.git", server_url));
+    repo_obj["ssh_url"] = serde_json::json!(format!("ssh://git@127.0.0.1/alice/repo.git"));
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/alice/repo"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(&repo_obj))
+        .mount(&instance.server)
+        .await;
+
+    // PR template lookups return 404
+    Mock::given(method("GET"))
+        .and(path_regex(r"/api/v1/repos/alice/repo/raw/.*"))
+        .respond_with(
+            ResponseTemplate::new(404)
+                .set_body_json(serde_json::json!({"message": "not found", "url": ""})),
+        )
+        .mount(&instance.server)
+        .await;
+
+    // Branch comparison
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/alice/repo/compare/main...feature-branch"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "commits": [{
+                "sha": "abc123",
+                "url": format!("{}/api/v1/repos/alice/repo/git/commits/abc123", server_url),
+                "html_url": format!("{}/alice/repo/commit/abc123", server_url),
+                "commit": {
+                    "message": "Add feature",
+                    "url": format!("{}/api/v1/repos/alice/repo/git/commits/abc123", server_url),
+                    "author": {"name": "Alice", "email": "a@example.com", "date": "2024-01-15T10:00:00Z"},
+                    "committer": {"name": "Alice", "email": "a@example.com", "date": "2024-01-15T10:00:00Z"}
+                },
+                "created": "2024-01-15T10:00:00Z"
+            }],
+            "total_commits": 1
+        })))
+        .mount(&instance.server)
+        .await;
+
+    // The actual PR creation -- verify the head branch is the local branch name
+    Mock::given(method("POST"))
+        .and(path("/api/v1/repos/alice/repo/pulls"))
+        .and(body_partial_json(
+            serde_json::json!({"head": "feature-branch"}),
+        ))
+        .respond_with(ResponseTemplate::new(201).set_body_json(mock_pr_obj()))
+        .expect(1)
+        .mount(&instance.server)
+        .await;
+
+    instance
+        .fj()
+        .current_dir(&repo_path)
+        .args([
+            "pr", "create", "--base", "main", "Test PR", "--body", "PR body",
         ])
         .assert()
         .success()
