@@ -663,7 +663,7 @@ async fn view_issues(
         created_by: creator,
         assigned_by: assignee,
         state: state.map(|s| s.into()),
-        r#type: None,
+        r#type: Some(forgejo_api::structs::IssueListIssuesQueryType::Issues),
         milestones: milestone,
         since: None,
         before: None,
