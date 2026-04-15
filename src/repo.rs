@@ -1670,30 +1670,40 @@ pub fn archived_warning(repo: &forgejo_api::structs::Repository) -> eyre::Result
 }
 
 async fn view_repo_readme(api: &Forgejo, repo: &RepoName) -> eyre::Result<()> {
-    #[allow(clippy::type_complexity)]
-    let candidates: &[(&str, fn(&str) -> String)] = &[
-        ("README.md", crate::markdown),
-        ("readme.md", crate::markdown),
-        ("Readme.md", crate::markdown),
-        ("README", crate::markdown),
-        ("readme", crate::markdown),
-        ("README.txt", crate::render_text),
-        ("readme.txt", crate::render_text),
-        ("Readme.txt", crate::render_text),
-    ];
+    let query = forgejo_api::structs::RepoGetContentsListQuery::default();
+    let files = api
+        .repo_get_contents_list(repo.owner(), repo.name(), query)
+        .await?;
 
-    for &(filename, render) in candidates {
-        if let Ok(content) = api
-            .repo_get_raw_file(repo.owner(), repo.name(), filename, Default::default())
-            .await
-        {
-            let text = String::from_utf8_lossy(&content);
-            println!("{}", render(&text));
-            return Ok(());
-        }
+    let readme = files
+        .iter()
+        .filter(|file| file.r#type.as_deref().is_some_and(|t| t == "file"))
+        .filter_map(|file| {
+            file.name.as_deref().filter(|name| {
+                name.split_once(".")
+                    .map(|(s, _)| s)
+                    .unwrap_or(name)
+                    .eq_ignore_ascii_case("readme")
+            })
+        })
+        .next()
+        .ok_or_eyre("Repo does not have a README")?;
+    let is_md = readme
+        .rsplit_once(".")
+        .is_some_and(|(_, s)| s.eq_ignore_ascii_case("md"));
+
+    let query = forgejo_api::structs::RepoGetRawFileQuery::default();
+    let body = api
+        .repo_get_raw_file(repo.owner(), repo.name(), &readme, query)
+        .await?;
+    let body = String::from_utf8_lossy(body.as_ref());
+
+    if is_md {
+        println!("{}", crate::markdown(&body));
+    } else {
+        println!("{}", crate::render_text(&body));
     }
-
-    eyre::bail!("Repo does not have a README file");
+    Ok(())
 }
 
 async fn cmd_clone_repo(
