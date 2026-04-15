@@ -107,9 +107,7 @@ async fn main() -> eyre::Result<()> {
     let _ = VERBOSE_MODE.set(args.verbose);
 
     let mut keys = KeyInfo::load().await?;
-    let r = args.command.run(&mut keys, args.host.as_deref()).await;
-    keys.save().await?;
-    r?;
+    args.command.run(&mut keys, args.host.as_deref()).await?;
 
     Ok(())
 }
