@@ -62,7 +62,8 @@ impl KeyInfo {
         }
 
         let mut file = tokio::fs::OpenOptions::from(options)
-            .open(path.join("keys.json")).await?;
+            .open(path.join("keys.json"))
+            .await?;
         file.write_all(&json).await?;
 
         Ok(())
