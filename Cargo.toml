@@ -54,7 +54,7 @@ directories = "6.0.0"
 eyre = "0.6.12"
 forgejo-api = { version = "0.11.0", default-features = false, features = ["rustls-tls"] }
 futures = "0.3.31"
-git2 = { version = "0.20.1", features = ["vendored-libgit2"] }
+git2 = { version = "0.21.0", features = ["vendored-libgit2"] }
 hyper = "1.6.0"
 hyper-util = { version = "0.1.11", features = ["tokio", "server", "http1", "http2"] }
 open = "5.3.2"
@@ -82,7 +82,7 @@ tempfile = "3"
 wiremock = "0.6"
 
 [build-dependencies]
-git2 = { version = "0.20.1", features = ["vendored-libgit2"] }
+git2 = { version = "0.21.0", features = ["vendored-libgit2"] }
 uuid = "1.16.0"
 
 # Optimize serde and forgejo-api in dev/test builds to prevent
