@@ -1526,8 +1526,13 @@ async fn migrate_repo(
     let new_repo_url = new_repo
         .html_url
         .as_ref()
+<<<<<<< HEAD
         .ok_or_eyre("new repo doesnt have url")?;
     crate::output::success(&format!("Done! View online at {new_repo_url}"));
+=======
+        .ok_or_eyre("new repo doesn't have url")?;
+    ftl_println!("msg-repo-migrate-success", url = new_repo_url.as_str());
+>>>>>>> e3ad8f2 (fix typo)
 
     Ok(())
 }
