@@ -118,11 +118,9 @@ impl KeyInfo {
 #[serde(tag = "type")]
 pub enum LoginInfo {
     Application {
-        name: String,
         token: String,
     },
     OAuth {
-        name: String,
         token: String,
         refresh_token: String,
         expires_at: time::OffsetDateTime,
@@ -130,13 +128,6 @@ pub enum LoginInfo {
 }
 
 impl LoginInfo {
-    pub fn username(&self) -> &str {
-        match self {
-            LoginInfo::Application { name, .. } => name,
-            LoginInfo::OAuth { name, .. } => name,
-        }
-    }
-
     async fn refresh(&mut self, url: &Url) -> eyre::Result<bool> {
         if let LoginInfo::OAuth {
             token,
@@ -221,10 +212,18 @@ mod tests {
         assert_eq!(result, url);
     }
 
+    #[test]
+    fn login_info_ignores_legacy_name_field() {
+        // keys.json files written before the username removal (a5831f5)
+        // still contain a "name" field; loading them must keep working.
+        let json = r#"{"type":"Application","name":"alice","token":"token123"}"#;
+        let login: LoginInfo = serde_json::from_str(json).unwrap();
+        assert!(matches!(login, LoginInfo::Application { .. }));
+    }
+
     #[tokio::test]
     async fn refresh_is_noop_for_application_logins() {
         let mut login = LoginInfo::Application {
-            name: "alice".into(),
             token: "token123".into(),
         };
         let url = Url::parse("https://git.example.com/").unwrap();

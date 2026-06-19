@@ -33,33 +33,29 @@ async fn auth_logout_not_signed_in() {
 #[tokio::test]
 async fn auth_add_key_and_list() {
     let instance = common::TestInstance::start().await;
-    let host = instance.server.uri();
 
     // Add a key for the mock server host.
     instance
         .fj()
-        .args(["auth", "add-key", "alice", "mytoken123"])
+        .args(["auth", "add-key", "mytoken123"])
         .assert()
         .success();
 
-    // After adding a key, auth list should show the login.
+    // After adding a key, auth list should show the login's host.
     instance
         .fj()
         .args(["auth", "list"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("alice@"));
+        .stdout(predicate::str::contains("127.0.0.1"));
 
     // Trying to add a key again should report it already exists.
     instance
         .fj()
-        .args(["auth", "add-key", "bob", "othertoken"])
+        .args(["auth", "add-key", "othertoken"])
         .assert()
         .success()
         .stderr(predicate::str::contains("already exists"));
-
-    // Verify we can see the host in the output (the mock server is 127.0.0.1:PORT).
-    let _ = host;
 }
 
 #[tokio::test]
@@ -69,7 +65,7 @@ async fn auth_add_key_then_logout() {
     // Add a key first.
     instance
         .fj()
-        .args(["auth", "add-key", "alice", "mytoken123"])
+        .args(["auth", "add-key", "mytoken123"])
         .assert()
         .success();
 
@@ -79,7 +75,7 @@ async fn auth_add_key_then_logout() {
         .args(["auth", "list"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("alice@"));
+        .stdout(predicate::str::contains("127.0.0.1"));
 
     // Now extract the host part from the server URI. The logout command
     // expects the host:port without the scheme.
@@ -92,7 +88,7 @@ async fn auth_add_key_then_logout() {
         .args(["auth", "logout", host])
         .assert()
         .success()
-        .stderr(predicate::str::contains("Signed out of alice@"));
+        .stderr(predicate::str::contains("Signed out of "));
 
     // After logout, list should be empty again.
     instance

@@ -142,7 +142,7 @@ Then install forgejo-cli-plus using any method above.
 > Create a token at `https://<your-instance>/user/settings/applications`, then add it with the command below. Use `-H` if you're not inside a repo that points to your instance.
 
 ```sh
-fj -H codeberg.org auth add-key <your-username>
+fj -H codeberg.org auth add-key
 # paste the token when prompted
 
 fj whoami                                    # verify it worked
@@ -423,7 +423,7 @@ fj user gpg verify <id>                     Verify key
 ```
 fj auth login                               Log in (OAuth, opens browser)
 fj auth logout <host>                       Log out
-fj auth add-key <user> [key]                Add API token directly
+fj auth add-key [key]                       Add API token directly
 fj auth use-ssh [bool]                      Toggle SSH as default
 fj auth list                                List instances
 ```
