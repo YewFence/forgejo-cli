@@ -7,7 +7,7 @@ Usage: fj repo [OPTIONS] <COMMAND>
 Commands:
   create   Creates a new repository
   fork     Fork a repository onto your account
-  migrate  
+  migrate  Migrate or mirror an existing repository
   view     View a repo's info
   readme   View a repo's README
   clone    Clone a repo's code locally

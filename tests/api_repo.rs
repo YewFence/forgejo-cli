@@ -192,6 +192,36 @@ async fn repo_migrate() {
         .stderr(predicate::str::contains("Done! View online at"));
 }
 
+#[tokio::test]
+async fn repo_migrate_with_owner() {
+    let instance = common::TestInstance::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/api/v1/repos/migrate"))
+        .and(body_partial_json(serde_json::json!({
+            "repo_owner": "someorg",
+            "repo_name": "my-mirror"
+        })))
+        .respond_with(
+            ResponseTemplate::new(201).set_body_json(mock_repo_json("someorg", "my-mirror")),
+        )
+        .expect(1)
+        .mount(&instance.server)
+        .await;
+
+    instance
+        .fj()
+        .args([
+            "repo",
+            "migrate",
+            "https://github.com/example/repo",
+            "someorg/my-mirror",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Done! View online at"));
+}
+
 // ===========================================================================
 // Edit / Units
 // ===========================================================================
