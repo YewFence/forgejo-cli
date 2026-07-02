@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::{io::Write, str::FromStr};
 
@@ -5,8 +6,8 @@ use clap::{Args, Subcommand};
 use eyre::{Context, OptionExt};
 use forgejo_api::{
     structs::{
-        CreatePullRequestOption, MergePullRequestOption, RepoGetPullRequestCommitsQuery,
-        RepoGetPullRequestFilesQuery, StateType,
+        CreatePullRequestOption, MergePullRequestOption, PullReview, PullReviewComment,
+        RepoGetPullRequestCommitsQuery, RepoGetPullRequestFilesQuery, StateType,
     },
     Forgejo,
 };
@@ -44,6 +45,12 @@ pub enum PrSubcommand {
         /// Filter by milestone name
         #[clap(long, short = 'M')]
         milestone: Option<String>,
+        /// Filter by base branch name (server-side, via the pulls endpoint)
+        #[clap(long)]
+        base: Option<String>,
+        /// Filter by head branch name (server-side, via the pulls endpoint)
+        #[clap(long)]
+        head: Option<String>,
         /// The repo to search in
         #[clap(long, short)]
         repo: Option<RepoArg>,
@@ -211,6 +218,40 @@ pub enum PrSubcommand {
         #[clap(long, short = 'r')]
         repo: Option<RepoArg>,
     },
+    /// View the review on a pull request
+    Review {
+        /// The pull request to view.
+        id: Option<IssueId>,
+        /// The repo to operate on (alternative to owner/repo#id syntax)
+        #[clap(long, short = 'r')]
+        repo: Option<RepoArg>,
+        #[clap(subcommand)]
+        command: Option<ReviewCommand>,
+    },
+    /// Assign users to a pull request
+    Assign {
+        /// The pull request to assign users to
+        #[clap(long, short)]
+        pr: Option<IssueId>,
+        /// Usernames to assign
+        #[clap(required = true)]
+        users: Vec<String>,
+        /// The repo to operate on (alternative to owner/repo#id syntax)
+        #[clap(long, short = 'r')]
+        repo: Option<RepoArg>,
+    },
+    /// Unassign users from a pull request
+    Unassign {
+        /// The pull request to unassign users from
+        #[clap(long, short)]
+        pr: Option<IssueId>,
+        /// Usernames to unassign
+        #[clap(required = true)]
+        users: Vec<String>,
+        /// The repo to operate on (alternative to owner/repo#id syntax)
+        #[clap(long, short = 'r')]
+        repo: Option<RepoArg>,
+    },
 }
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug)]
@@ -339,6 +380,19 @@ pub enum ViewCommand {
     },
 }
 
+#[derive(Subcommand, Clone, Debug)]
+pub enum ReviewCommand {
+    /// List reviews on a pull request.
+    List {
+        /// List inline comments in reviews on a pull request.
+        #[clap(long, short)]
+        comments: bool,
+        /// Include all reviews, including stale and dismissed ones.
+        #[clap(long, short)]
+        all: bool,
+    },
+}
+
 impl PrCommand {
     pub async fn run(self, keys: &mut crate::KeyInfo, host_name: Option<&str>) -> eyre::Result<()> {
         use PrSubcommand::*;
@@ -432,10 +486,12 @@ impl PrCommand {
                 assignee,
                 state,
                 milestone,
+                base,
+                head,
                 repo: _,
             } => {
                 view_prs(
-                    repo, &api, query, labels, creator, assignee, state, milestone,
+                    repo, &api, query, labels, creator, assignee, state, milestone, base, head,
                 )
                 .await?
             }
@@ -508,6 +564,37 @@ impl PrCommand {
                 let (repo, pr) = try_get_pr_number(repo, &api, pr.map(|pr| pr.number)).await?;
                 crate::issues::add_comment(&repo, &api, pr, body, body_file).await?
             }
+            Review {
+                id,
+                command,
+                repo: _,
+            } => {
+                let id = id.map(|id| id.number);
+                match command.unwrap_or(ReviewCommand::List {
+                    comments: false,
+                    all: false,
+                }) {
+                    ReviewCommand::List { comments, all } => {
+                        view_pr_reviews(repo, &api, id, comments, all).await?
+                    }
+                }
+            }
+            Assign {
+                pr,
+                users,
+                repo: _,
+            } => {
+                let (repo, pr) = try_get_pr_number(repo, &api, pr.map(|pr| pr.number)).await?;
+                crate::issues::edit_assignees(&repo, &api, pr, users, vec![]).await?
+            }
+            Unassign {
+                pr,
+                users,
+                repo: _,
+            } => {
+                let (repo, pr) = try_get_pr_number(repo, &api, pr.map(|pr| pr.number)).await?;
+                crate::issues::edit_assignees(&repo, &api, pr, vec![], users).await?
+            }
         }
         Ok(())
     }
@@ -524,7 +611,10 @@ impl PrCommand {
             | Close { repo, pr, .. }
             | Reopen { repo, pr, .. }
             | Merge { repo, pr, .. }
-            | Browse { repo, id: pr, .. } => {
+            | Browse { repo, id: pr, .. }
+            | Review { repo, id: pr, .. }
+            | Assign { repo, pr, .. }
+            | Unassign { repo, pr, .. } => {
                 repo.as_ref().or(pr.as_ref().and_then(|x| x.repo.as_ref()))
             }
         }
@@ -550,7 +640,10 @@ impl PrCommand {
             | Close { pr, .. }
             | Reopen { pr, .. }
             | Merge { pr, .. }
-            | Browse { id: pr, .. } => match pr {
+            | Browse { id: pr, .. }
+            | Review { id: pr, .. }
+            | Assign { pr, .. }
+            | Unassign { pr, .. } => match pr {
                 Some(pr) => eyre::eyre!(
                     "can't figure out what repo to access, try specifying with `--repo` or `{{owner}}/{{repo}}#{}`",
                     pr.number
@@ -566,6 +659,23 @@ impl PrCommand {
 pub async fn view_pr(repo: &RepoName, api: &Forgejo, id: Option<i64>) -> eyre::Result<()> {
     let pr = try_get_pr(repo, api, id).await?;
     let id = pr.number.ok_or_eyre("pr does not have number")?;
+
+    // Only fetched for the human-readable archived-repo warning; --json output
+    // must not make the extra API call, and a failed lookup must not abort the
+    // view (the warning is decorative). Uses the PR's base repo, which is
+    // where interactions are disabled.
+    let repo_info = if crate::json_mode() {
+        None
+    } else {
+        let repo_info = match repo_name_from_pr(&pr) {
+            Ok(base_repo) => api.repo_get(base_repo.owner(), base_repo.name()).await.ok(),
+            Err(_) => None,
+        };
+        if repo_info.is_none() {
+            crate::verbose_log!("Skipping archived-repo check: base repo lookup failed");
+        }
+        repo_info
+    };
 
     crate::output::print_or_json(&pr, || {
         let crate::SpecialRender {
@@ -679,6 +789,11 @@ pub async fn view_pr(repo: &RepoName, api: &Forgejo, id: Option<i64>) -> eyre::R
             }
         }
         println!();
+
+        if let Some(repo_info) = &repo_info {
+            crate::repo::archived_warning(repo_info)?;
+        }
+
         if comments == 1 {
             println!("1 comment");
         } else {
@@ -858,8 +973,8 @@ fn print_pr_status(pr_status: &PrStatus) -> eyre::Result<()> {
                         println!("{light_grey}Draft{reset} {dash} Can't merge draft PR")
                     } else {
                         print!("{bright_green}Open{reset} {dash} ");
-                        let mergable = pr.mergeable.ok_or_eyre("pr does not have mergable")?;
-                        if mergable {
+                        let mergeable = pr.mergeable.ok_or_eyre("pr does not have mergeable")?;
+                        if mergeable {
                             println!("Can be merged");
                         } else {
                             println!("{bright_red}Merge conflicts{reset}");
@@ -886,12 +1001,162 @@ fn print_pr_status(pr_status: &PrStatus) -> eyre::Result<()> {
                     CommitStatusState::Pending => print!("{yellow}Pending{reset}"),
                     CommitStatusState::Warning => print!("{bright_yellow}Warning{reset}"),
                     CommitStatusState::Failure => print!("{bright_red}Failure{reset}"),
+                    CommitStatusState::Skipped => print!("{light_grey}Skipped{reset}"),
                     CommitStatusState::Error => print!("{bright_red}Error{reset}"),
                 };
                 println!(" {dash} {context}");
             }
         }
     }
+    Ok(())
+}
+
+fn print_pr_review(review: &PullReview) -> eyre::Result<()> {
+    let crate::SpecialRender {
+        bold,
+        bright_green,
+        bright_red,
+        bright_yellow,
+        dark_grey,
+        light_grey,
+        reset,
+        ..
+    } = crate::special_render();
+
+    let reviewer = review
+        .user
+        .as_ref()
+        .and_then(|u| u.login.as_deref())
+        .or_else(|| review.team.as_ref().and_then(|t| t.name.as_deref()))
+        .unwrap_or("???");
+
+    let state_label = review.state.as_deref().unwrap_or("???");
+    match state_label {
+        "APPROVED" => print!("{bright_green}{state_label}{reset}"),
+        "REQUEST_CHANGES" => print!("{bright_red}CHANGES REQUESTED{reset}"),
+        "COMMENT" => print!("{bright_yellow}{state_label}{reset}"),
+        "PENDING" => print!("{light_grey}{state_label}{reset}"),
+        _ => print!("{state_label}"),
+    };
+
+    println!(" by {bold}{reviewer}{reset}");
+
+    print!("{dark_grey}");
+
+    let comments_count = review.comments_count.unwrap_or_default();
+    if comments_count == 1 {
+        print!("1 code comment");
+    } else {
+        print!("{comments_count} code comments");
+    }
+
+    print!(", ");
+
+    let review_ts = review.updated_at.or(review.submitted_at);
+    if let Some(ts) = review_ts {
+        let timestamp = ts.format(&time::format_description::well_known::Rfc2822)?;
+        print!("made on {timestamp}");
+    }
+
+    let review_label = if review.stale.unwrap_or(false) {
+        "stale"
+    } else if review.dismissed.unwrap_or(false) {
+        "dismissed"
+    } else {
+        ""
+    };
+
+    if !review_label.is_empty() {
+        print!(" {bold}{light_grey}({review_label}){reset}");
+    }
+
+    println!("{reset}");
+
+    if let Some(body) = &review.body {
+        if !body.trim().is_empty() {
+            println!("{}", crate::markdown(body));
+        }
+    }
+
+    Ok(())
+}
+
+fn print_pr_reviews_comments(comments: &[PullReviewComment]) -> eyre::Result<()> {
+    // Group comments by file and position:
+    let comments_by_file = comments
+        .iter()
+        .map(|c| {
+            (
+                match (c.path.as_deref(), c.position) {
+                    // If the comment is on a specific line in a specific file, group by that.
+                    // Otherwise, group all comments with unknown position together.
+                    (Some(path), position) => (
+                        path,
+                        position.unwrap_or(c.original_position.unwrap_or_default()),
+                    ),
+                    _ => ("???", 0),
+                },
+                c,
+            )
+        })
+        .fold(BTreeMap::new(), |mut m, (k, v)| {
+            m.entry(k).or_insert_with(Vec::new).push(v);
+            m
+        });
+
+    for comment_group in comments_by_file {
+        print_pr_reviews_comment(comment_group)?;
+    }
+    Ok(())
+}
+
+fn print_pr_reviews_comment(
+    ((path, position), comments): ((&str, u64), Vec<&PullReviewComment>),
+) -> eyre::Result<()> {
+    let crate::SpecialRender {
+        bold,
+        dark_grey,
+        bright_cyan,
+        reset,
+        ..
+    } = crate::special_render();
+
+    let mut first = true;
+
+    for comment in comments {
+        let body = comment.body.as_deref().unwrap_or("").trim();
+
+        if body.is_empty() {
+            continue;
+        }
+
+        // Only print the file and position for the first non-empty comment in a
+        // group of comments on the same file and position.
+        if first {
+            first = false;
+            println!("---");
+            println!("In {bold}{path}:{position}{reset}:");
+            if let Some(diff_hunk) = &comment.diff_hunk {
+                println!("{dark_grey}{diff_hunk}{reset}");
+            }
+        }
+
+        let user = comment
+            .user
+            .as_ref()
+            .and_then(|u| u.login.as_deref())
+            .unwrap_or("???");
+
+        let resolver = comment.resolver.as_ref().and_then(|u| u.login.as_deref());
+
+        print!("{bold}{bright_cyan}{user}{reset} commented");
+        if let Some(resolver) = resolver {
+            print!(" (resolved by {resolver})");
+        }
+        println!(":");
+        println!("{}", crate::markdown(body));
+    }
+
     Ok(())
 }
 
@@ -982,7 +1247,7 @@ async fn create_pr(
 
             let branch_shorthand = head
                 .shorthand()
-                .ok_or_eyre("current branch does not have utf8 name")?;
+                .wrap_err("current branch does not have utf8 name")?;
 
             let tracking_remote = config
                 .get_string(&format!("branch.{branch_shorthand}.remote"))
@@ -1005,7 +1270,7 @@ async fn create_pr(
                 local_repo
                     .find_remote(resolved_remote_name)?
                     .url()
-                    .ok_or_eyre("remote does not have utf8 url")?,
+                    .wrap_err("remote does not have utf8 url")?,
             )?;
             let remote_host = crate::repo_url_host_name(&remote_url);
 
@@ -1344,6 +1609,11 @@ async fn create_pr(
                                 git_config.set_str("push.default", "upstream")?;
                                 git_config.set_str(&merge_setting_name, &topic_setting)?;
                                 git_config.set_str(&remote_setting_name, remote)?;
+                                let crate::SpecialRender { bold, reset, .. } =
+                                    crate::special_render();
+                                println!("{bold}Note:{reset}");
+                                println!("  `git push --force[-with-lease]` is not supported for AGit PRs.");
+                                println!("  You can use `git push -o force=true` instead.");
                                 break;
                             }
                             "?" | "h" | "H" | "help" => {
@@ -1478,10 +1748,10 @@ async fn checkout_pr(
 
     let mut options = git2::StatusOptions::new();
     options.include_ignored(false);
-    let has_no_uncommited = local_repo.statuses(Some(&mut options)).unwrap().is_empty();
+    let has_no_uncommitted = local_repo.statuses(Some(&mut options)).unwrap().is_empty();
     eyre::ensure!(
-        has_no_uncommited,
-        "Cannot checkout PR, working directory has uncommited changes"
+        has_no_uncommitted,
+        "Cannot checkout PR, working directory has uncommitted changes"
     );
 
     let remote_repo = match pr {
@@ -1503,22 +1773,16 @@ async fn checkout_pr(
         .await?;
 
     let url = crate::repo::git_url(&remote_repo, ssh)?;
+    let url_host = url.host_str().ok_or_eyre("url has no host")?;
     let mut remote = local_repo.remote_anonymous(url.as_str())?;
-    let branch_name = branch_name.unwrap_or_else(|| {
-        format!(
-            "pr-{}-{}-{}",
-            crate::repo_url_host_name(url),
-            repo_owner,
-            pr.number(),
-        )
-    });
+    let branch_name =
+        branch_name.unwrap_or_else(|| format!("pr-{}-{}-{}", url_host, repo_owner, pr.number(),));
 
     let mut auth = auth_git2::GitAuthenticator::new();
     if let Some(id) = identity_file {
         auth = auth.add_ssh_key_from_file(id, None);
     } else if url.scheme() == "ssh" {
-        auth =
-            crate::repo::load_ssh_keys(auth, url.host_str().ok_or_eyre("url does not have host")?);
+        auth = crate::repo::load_ssh_keys(auth, url_host);
     }
 
     auth.fetch(
@@ -1542,10 +1806,7 @@ async fn checkout_pr(
         } else {
             local_repo.branch(&branch_name, &commit, false)?
         };
-    let branch_ref = branch
-        .get()
-        .name()
-        .ok_or_eyre("branch does not have name")?;
+    let branch_ref = branch.get().name().wrap_err("branch does not have name")?;
 
     local_repo.set_head(branch_ref)?;
     local_repo
@@ -1566,6 +1827,49 @@ async fn checkout_pr(
     Ok(())
 }
 
+const PR_LIST_HEADERS: &[&str] = &["ID", "STATE", "TITLE", "LABELS", "ASSIGNEE", "AGE"];
+
+/// Client-side query filtering: the Forgejo API `q` parameter is unreliable
+/// on some instances (especially large repos), and the pulls endpoint has no
+/// `q` parameter at all, so we filter results locally to ensure only matching
+/// PRs are shown. `q_lower` must already be lowercased.
+fn matches_query(title: Option<&str>, body: Option<&str>, q_lower: &str) -> bool {
+    title.unwrap_or("").to_lowercase().contains(q_lower)
+        || body.unwrap_or("").to_lowercase().contains(q_lower)
+}
+
+/// Build a `pr search` table row. Shared between the issues-endpoint path
+/// (`Issue`) and the pulls-endpoint path (`PullRequest`), which have
+/// identically-typed fields but are distinct structs.
+fn pr_list_row(
+    number: Option<i64>,
+    state: Option<&StateType>,
+    title: Option<&str>,
+    labels: Option<&[forgejo_api::structs::Label]>,
+    assignee: Option<&forgejo_api::structs::User>,
+    created_at: Option<&time::OffsetDateTime>,
+) -> Vec<String> {
+    let number = number.map(|n| format!("#{n}")).unwrap_or_default();
+    let state = state.map(crate::output::colored_state).unwrap_or_default();
+    let title = title.unwrap_or("").to_string();
+    let labels = labels
+        .map(|ls| {
+            ls.iter()
+                .filter_map(|l| l.name.as_deref())
+                .collect::<Vec<_>>()
+                .join(",")
+        })
+        .unwrap_or_default();
+    let assignee = assignee
+        .and_then(|u| u.login.as_deref())
+        .map(|u| format!("@{u}"))
+        .unwrap_or_default();
+    let age = created_at
+        .map(crate::output::relative_time)
+        .unwrap_or_default();
+    vec![number, state, title, labels, assignee, age]
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn view_prs(
     repo: &RepoName,
@@ -1576,10 +1880,83 @@ async fn view_prs(
     assignee: Option<String>,
     state: Option<crate::issues::State>,
     milestone: Option<String>,
+    base: Option<String>,
+    head: Option<String>,
 ) -> eyre::Result<()> {
     let labels = labels
         .map(|s| s.split(',').map(|s| s.to_string()).collect::<Vec<_>>())
         .unwrap_or_default();
+
+    // Base/head filtering is only available on the pulls endpoint, so switch
+    // to it when either flag is given. The default path stays on the issues
+    // endpoint, which supports free-text `q` and assignee filtering.
+    if base.is_some() || head.is_some() {
+        eyre::ensure!(
+            assignee.is_none(),
+            "--assignee cannot be combined with --base/--head; \
+            the pulls endpoint does not support filtering by assignee"
+        );
+        let label_ids = if labels.is_empty() {
+            None
+        } else {
+            Some(crate::issues::label_names_to_ids(repo, api, labels).await?)
+        };
+        let milestone_id = match &milestone {
+            Some(ms) => Some(
+                crate::milestone::find_milestone(api, repo, ms)
+                    .await?
+                    .id
+                    .ok_or_eyre("milestone does not have id")?,
+            ),
+            None => None,
+        };
+        let query = forgejo_api::structs::RepoListPullRequestsQuery {
+            state: state.map(|s| {
+                use forgejo_api::structs::RepoListPullRequestsQueryState as QueryState;
+                match s {
+                    crate::issues::State::Open => QueryState::Open,
+                    crate::issues::State::Closed => QueryState::Closed,
+                    crate::issues::State::All => QueryState::All,
+                }
+            }),
+            sort: None,
+            milestone: milestone_id,
+            labels: label_ids,
+            poster: creator,
+            base,
+            head,
+        };
+        crate::verbose_log!(
+            "Listing pull requests for {}/{} via the pulls endpoint",
+            repo.owner(),
+            repo.name()
+        );
+        let prs = api
+            .repo_list_pull_requests(repo.owner(), repo.name(), query)
+            .all()
+            .await?;
+        let prs: Vec<_> = match &query_str {
+            Some(q) => {
+                let q_lower = q.to_lowercase();
+                prs.into_iter()
+                    .filter(|pr| matches_query(pr.title.as_deref(), pr.body.as_deref(), &q_lower))
+                    .collect()
+            }
+            None => prs,
+        };
+        crate::output::print_list(&prs, PR_LIST_HEADERS, |pr| {
+            pr_list_row(
+                pr.number,
+                pr.state.as_ref(),
+                pr.title.as_deref(),
+                pr.labels.as_deref(),
+                pr.assignee.as_ref(),
+                pr.created_at.as_ref(),
+            )
+        });
+        return Ok(());
+    }
+
     let query = forgejo_api::structs::IssueListIssuesQuery {
         q: query_str.clone(),
         labels: Some(labels.join(",")),
@@ -1597,64 +1974,25 @@ async fn view_prs(
         .issue_list_issues(repo.owner(), repo.name(), query)
         .all()
         .await?;
-    // Client-side filtering: the Forgejo API `q` parameter is unreliable on
-    // some instances (especially large repos), so we filter results locally
-    // to ensure only matching PRs are shown.
-    let prs: Vec<_> = if let Some(ref q) = query_str {
-        let q_lower = q.to_lowercase();
-        prs.into_iter()
-            .filter(|pr| {
-                pr.title
-                    .as_deref()
-                    .unwrap_or("")
-                    .to_lowercase()
-                    .contains(&q_lower)
-                    || pr
-                        .body
-                        .as_deref()
-                        .unwrap_or("")
-                        .to_lowercase()
-                        .contains(&q_lower)
-            })
-            .collect()
-    } else {
-        prs
+    let prs: Vec<_> = match &query_str {
+        Some(q) => {
+            let q_lower = q.to_lowercase();
+            prs.into_iter()
+                .filter(|pr| matches_query(pr.title.as_deref(), pr.body.as_deref(), &q_lower))
+                .collect()
+        }
+        None => prs,
     };
-    crate::output::print_list(
-        &prs,
-        &["ID", "STATE", "TITLE", "LABELS", "ASSIGNEE", "AGE"],
-        |pr| {
-            let number = pr.number.map(|n| format!("#{n}")).unwrap_or_default();
-            let state = pr
-                .state
-                .as_ref()
-                .map(crate::output::colored_state)
-                .unwrap_or_default();
-            let title = pr.title.as_deref().unwrap_or("").to_string();
-            let labels = pr
-                .labels
-                .as_ref()
-                .map(|ls| {
-                    ls.iter()
-                        .filter_map(|l| l.name.as_deref())
-                        .collect::<Vec<_>>()
-                        .join(",")
-                })
-                .unwrap_or_default();
-            let assignee = pr
-                .assignee
-                .as_ref()
-                .and_then(|u| u.login.as_deref())
-                .map(|u| format!("@{u}"))
-                .unwrap_or_default();
-            let age = pr
-                .created_at
-                .as_ref()
-                .map(crate::output::relative_time)
-                .unwrap_or_default();
-            vec![number, state, title, labels, assignee, age]
-        },
-    );
+    crate::output::print_list(&prs, PR_LIST_HEADERS, |pr| {
+        pr_list_row(
+            pr.number,
+            pr.state.as_ref(),
+            pr.title.as_deref(),
+            pr.labels.as_deref(),
+            pr.assignee.as_ref(),
+            pr.created_at.as_ref(),
+        )
+    });
     Ok(())
 }
 
@@ -1823,6 +2161,86 @@ async fn view_pr_commits(
             println!();
         }
     }
+    Ok(())
+}
+
+pub async fn view_pr_reviews(
+    repo: &RepoName,
+    api: &Forgejo,
+    pr: Option<i64>,
+    comments: bool,
+    include_stale: bool,
+) -> eyre::Result<()> {
+    let pr = try_get_pr(repo, api, pr).await?;
+    let pr_number = pr.number.ok_or_eyre("pr does not have number")?;
+    let repo = repo_name_from_pr(&pr)?;
+    let mut reviews = api
+        .repo_list_pull_reviews(repo.owner(), repo.name(), pr_number)
+        .all()
+        .await?;
+
+    // Review-request entries aren't submitted reviews; drop them up front so
+    // the empty/stale messaging below stays accurate.
+    reviews.retain(|r| r.state.as_deref() != Some("REQUEST_REVIEW"));
+
+    if crate::json_mode() {
+        let visible: Vec<&PullReview> = reviews
+            .iter()
+            .filter(|r| {
+                include_stale || !(r.stale.unwrap_or(false) || r.dismissed.unwrap_or(false))
+            })
+            .collect();
+        if comments {
+            let mut out = Vec::with_capacity(visible.len());
+            for review in visible {
+                let review_id = review.id.ok_or_eyre("review does not have id")?;
+                let review_comments = api
+                    .repo_get_pull_review_comments(repo.owner(), repo.name(), pr_number, review_id)
+                    .await?;
+                out.push(serde_json::json!({
+                    "review": review,
+                    "comments": review_comments,
+                }));
+            }
+            println!("{}", serde_json::to_string_pretty(&out)?);
+        } else {
+            println!("{}", serde_json::to_string_pretty(&visible)?);
+        }
+        return Ok(());
+    }
+
+    if reviews.is_empty() {
+        println!("No reviews.");
+        return Ok(());
+    }
+
+    let mut first = false;
+
+    for review in &reviews {
+        if !include_stale && (review.stale.unwrap_or(false) || review.dismissed.unwrap_or(false)) {
+            continue;
+        }
+        if !first {
+            first = true;
+        } else {
+            println!("---");
+        }
+        print_pr_review(review)?;
+        if comments {
+            let review_id = review.id.ok_or_eyre("review does not have id")?;
+            let review_comments = api
+                .repo_get_pull_review_comments(repo.owner(), repo.name(), pr_number, review_id)
+                .await?;
+            print_pr_reviews_comments(&review_comments)?;
+        }
+    }
+
+    // if first is still false, that means all remaining reviews were stale or
+    // dismissed and nothing was printed.
+    if !first {
+        println!("Only stale or dismissed reviews, use -a to display them.");
+    }
+
     Ok(())
 }
 

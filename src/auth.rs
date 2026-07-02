@@ -1,5 +1,4 @@
 use clap::Subcommand;
-use eyre::OptionExt;
 use sha2::Digest;
 
 use std::collections::BTreeMap;
@@ -20,8 +19,6 @@ pub enum AuthCommand {
     ///
     /// Use this if `fj auth login` doesn't work
     AddKey {
-        /// The user that the key is associated with
-        user: String,
         /// The key to add. If not present, the key will be read in from stdin.
         key: Option<String>,
     },
@@ -41,6 +38,7 @@ impl AuthCommand {
                 let client_info = get_client_info_for(host_url).await?;
                 if let Some(client_id) = &client_info {
                     oauth_login(keys, host_url, client_id).await?;
+                    keys.save().await?;
                 } else {
                     let host_domain = crate::host_name(host_url);
                     let applications_url =
@@ -54,13 +52,14 @@ impl AuthCommand {
             }
             AuthCommand::Logout { host } => {
                 let info_opt = keys.hosts.remove(&host);
-                if let Some(info) = info_opt {
-                    crate::output::success(&format!("Signed out of {}@{}", info.username(), host));
+                if info_opt.is_some() {
+                    crate::output::success(&format!("Signed out of {host}"));
+                    keys.save().await?;
                 } else {
                     crate::output::info(&format!("Already not signed in to {host}"));
                 }
             }
-            AuthCommand::AddKey { user, key } => {
+            AuthCommand::AddKey { key } => {
                 let repo_info = crate::repo::RepoInfo::get_current(host_name, None, None, keys)?;
                 let host_url = repo_info.host_url();
                 let key = match key {
@@ -69,12 +68,10 @@ impl AuthCommand {
                 };
                 let host = crate::host_name(host_url);
                 if !keys.hosts.contains_key(host) {
-                    let mut login = crate::keys::LoginInfo::Application {
-                        name: user,
-                        token: key,
-                    };
+                    let mut login = crate::keys::LoginInfo::Application { token: key };
                     add_ssh_alias(&mut login, host_url, keys).await;
                     keys.hosts.insert(host.to_owned(), login);
+                    keys.save().await?;
                 } else {
                     crate::output::info(&format!("Key for {host} already exists"));
                 }
@@ -86,9 +83,10 @@ impl AuthCommand {
                     crate::output::error(&format!("Not logged in to {host}"));
                 } else {
                     if use_ssh.unwrap_or(true) {
-                        let already_present = keys.default_ssh.insert(host.to_string());
-                        if already_present {
+                        let newly_added = keys.default_ssh.insert(host.to_string());
+                        if newly_added {
                             crate::output::success(&format!("Now using SSH for {host} by default"));
+                            keys.save().await?;
                         } else {
                             crate::output::info(&format!(
                                 "Already using SSH for {host} by default"
@@ -100,6 +98,7 @@ impl AuthCommand {
                             crate::output::success(&format!(
                                 "No longer using SSH for {host} by default"
                             ));
+                            keys.save().await?;
                         } else {
                             crate::output::info(&format!(
                                 "Already not using SSH for {host} by default"
@@ -112,8 +111,8 @@ impl AuthCommand {
                 if keys.hosts.is_empty() {
                     crate::output::info("No logins.");
                 }
-                for (host_url, login_info) in &keys.hosts {
-                    println!("{}@{}", login_info.username(), host_url);
+                for host_url in keys.hosts.keys() {
+                    println!("{host_url}");
                 }
             }
         }
@@ -152,12 +151,12 @@ pub async fn get_client_info_for(url: &url::Url) -> eyre::Result<Option<String>>
     let builtin = match host {
         "codeberg.org" => "19ac3dd0-e101-445d-aa60-d8ea3876bc5d",
         "code.forgejo.org" => "ab67d8a2-72bd-42e8-ae05-937eaba31e24",
-        "v7.next.forgejo.org" => "adf79db0-0e6c-41d8-93a9-3c13e797e880",
         "v11.next.forgejo.org" => "0df6d672-fe05-4c9a-a5a9-e111e4905e14",
         "v12.next.forgejo.org" => "df333c23-09a7-41ee-ad52-de673166dbb8",
         "v13.next.forgejo.org" => "ef27a227-65f4-4bcb-be56-f8c9b44457b0",
         "v14.next.forgejo.org" => "2dc5d6d7-01b0-47b4-814e-b4b60aea2376",
         "v15.next.forgejo.org" => "344998d8-4139-4a51-8ef9-a5fa40673ea5",
+        "v16.next.forgejo.org" => "0b561d01-fd05-4321-9d46-9cb8c776fc80",
         "git.disroot.org" => "c6051ae0-6d21-4c17-92e6-41b957376d09",
         "git.pub.solar" => "6c7fad2f-41c4-4c2d-90b2-5f7fd19c9be2",
         "git.kaki87.net" => "951299e6-cf99-4a9e-8aaf-4b4b4ac36f04",
@@ -166,7 +165,7 @@ pub async fn get_client_info_for(url: &url::Url) -> eyre::Result<Option<String>>
         "git.lix.systems" => "71ec029f-b5a1-4079-8e06-5b957288b063",
         "code.ffmpeg.org" => "75d19c4d-01d0-4825-8953-76ad66543f2c",
         "forge.fedoraproject.org" => "b15a2f44-75b0-4d2f-a740-50e45cc161a3",
-        "codefloe.com" => "78a6d7db-3631-48bb-94a4-340e770f6bce",
+        "codefloe.com" => "d8f0480c-cc0a-4cfc-8a16-4b88230d61d4",
         _ => return Ok(None),
     };
 
@@ -227,15 +226,15 @@ async fn oauth_login(
         ("code_challenge", &code_challenge),
         ("state", &state),
     ]);
-    open::that(auth_url.as_str()).unwrap();
+    open::that_detached(auth_url.as_str()).unwrap();
 
     let (handle, mut rx) = auth_server();
     let res = rx.recv().await.unwrap();
     handle.abort();
     let code = match res {
-        Ok(Some((code, returned_state))) => {
-            if returned_state == state {
-                code
+        Ok(Some(response)) => {
+            if response.state == state {
+                response.code
             } else {
                 eyre::bail!("returned with invalid state");
             }
@@ -262,22 +261,11 @@ async fn oauth_login(
     };
     let response = api.oauth_get_access_token(request).await?;
 
-    let api = forgejo_api::Forgejo::with_user_agent(
-        forgejo_api::Auth::OAuth2(&response.access_token),
-        host.clone(),
-        crate::USER_AGENT,
-    )?;
-    let current_user = api.user_get_current().await?;
-    let name = current_user
-        .login
-        .ok_or_eyre("user does not have login name")?;
-
     // A minute less, in case any weirdness happens at the exact moment it
     // expires. Better to refresh slightly too soon than slightly too late.
     let expires_in = std::time::Duration::from_secs(response.expires_in.saturating_sub(60) as u64);
     let expires_at = time::OffsetDateTime::now_utc() + expires_in;
     let mut login_info = crate::keys::LoginInfo::OAuth {
-        name,
         token: response.access_token,
         refresh_token: response.refresh_token,
         expires_at,
@@ -291,11 +279,14 @@ async fn oauth_login(
 
 use tokio::{sync::mpsc::Receiver, task::JoinHandle};
 
-#[allow(clippy::type_complexity)]
-fn auth_server() -> (
-    JoinHandle<eyre::Result<()>>,
-    Receiver<Result<Option<(String, String)>, String>>,
-) {
+struct AuthResponse {
+    code: String,
+    state: String,
+}
+
+type AuthServerReceiver = Receiver<Result<Option<AuthResponse>, String>>;
+
+fn auth_server() -> (JoinHandle<eyre::Result<()>>, AuthServerReceiver) {
     let addr: std::net::SocketAddr = ([127, 0, 0, 1], 26218).into();
     let (tx, rx) = tokio::sync::mpsc::channel(1);
     let tx = std::sync::Arc::new(tx);
@@ -323,7 +314,10 @@ fn auth_server() -> (
                 let (response, message) = match (code, state, error_description) {
                     (_, _, Some(error)) => (Err(error.to_owned()), "Failed to authenticate"),
                     (Some(code), Some(state), None) => (
-                        Ok(Some((code.to_owned(), state.to_owned()))),
+                        Ok(Some(AuthResponse {
+                            code: code.to_owned(),
+                            state: state.to_owned(),
+                        })),
                         "Authenticated! Close this tab and head back to your terminal",
                     ),
                     _ => (Ok(None), "Canceled"),

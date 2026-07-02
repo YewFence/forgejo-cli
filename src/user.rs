@@ -151,13 +151,13 @@ pub enum EditCommand {
     Activity {
         /// The visibility of your activity.
         #[clap(long)]
-        visibility: VisbilitySetting,
+        visibility: VisibilitySetting,
     },
     /// Manage the email addresses associated with your account
     Email {
         /// Set the visibility of your email address.
         #[clap(long)]
-        visibility: Option<VisbilitySetting>,
+        visibility: Option<VisibilitySetting>,
         /// Add a new email address
         #[clap(long, short)]
         add: Vec<String>,
@@ -274,7 +274,7 @@ pub enum GpgCommand {
 }
 
 #[derive(clap::ValueEnum, Clone, Debug, PartialEq, Eq)]
-pub enum VisbilitySetting {
+pub enum VisibilitySetting {
     Hidden,
     Public,
 }
@@ -684,6 +684,33 @@ async fn list_activity(api: &Forgejo, user: Option<&str>) -> eyre::Result<()> {
     })
 }
 
+fn repo_name(repo: &forgejo_api::structs::Repository) -> eyre::Result<&str> {
+    repo.full_name
+        .as_deref()
+        .ok_or_eyre("repo does not have full name")
+}
+
+fn issue_name<'a>(
+    repo: &'a forgejo_api::structs::Repository,
+    content: &str,
+) -> eyre::Result<(&'a str, String)> {
+    let full_name = repo_name(repo)?;
+    // Forgejo API returns content as JSON array '["id","name"]' in newer versions,
+    // or as 'id|name' in older versions. Handle both.
+    let issue_id = if content.starts_with('[') {
+        serde_json::from_str::<Vec<String>>(content)
+            .ok()
+            .and_then(|v| v.into_iter().next())
+            .unwrap_or_else(|| content.to_string())
+    } else {
+        content
+            .split_once("|")
+            .map_or(content, |(id, _)| id)
+            .to_string()
+    };
+    Ok((full_name, issue_id))
+}
+
 pub fn print_activity(activity: &forgejo_api::structs::Activity) -> eyre::Result<()> {
     let SpecialRender {
         bold,
@@ -719,44 +746,14 @@ pub fn print_activity(activity: &forgejo_api::structs::Activity) -> eyre::Result
         .as_deref()
         .ok_or_eyre("repo does not have full name");
 
-    fn issue_name<'a>(
-        repo: &'a forgejo_api::structs::Repository,
-        content: &str,
-    ) -> eyre::Result<(&'a str, String)> {
-        let full_name = repo
-            .full_name
-            .as_deref()
-            .ok_or_eyre("repo does not have full name")?;
-        // Forgejo API returns content as JSON array '["id","name"]' in newer versions,
-        // or as 'id|name' in older versions. Handle both.
-        let issue_id = if content.starts_with('[') {
-            serde_json::from_str::<Vec<String>>(content)
-                .ok()
-                .and_then(|v| v.into_iter().next())
-                .unwrap_or_else(|| content.to_string())
-        } else {
-            content
-                .split_once("|")
-                .map_or(content, |(id, _)| id)
-                .to_string()
-        };
-        Ok((full_name, issue_id))
-    }
-
     print!("");
     use forgejo_api::structs::ActivityOpType;
     match op_type {
         ActivityOpType::CreateRepo => {
             let repo = repo?;
-            let full_name = repo
-                .full_name
-                .as_deref()
-                .ok_or_eyre("repo does not have full name")?;
+            let full_name = repo_name(repo)?;
             if let Some(parent) = &repo.parent {
-                let parent_full_name = parent
-                    .full_name
-                    .as_deref()
-                    .ok_or_eyre("parent repo does not have full name")?;
+                let parent_full_name = repo_name(parent)?;
                 println!("{bold}{actor_name}{reset} forked repository {bold}{yellow}{parent_full_name}{reset} to {bold}{yellow}{full_name}{reset}");
             } else if repo.mirror.is_some_and(|b| b) {
                 println!(
@@ -769,40 +766,24 @@ pub fn print_activity(activity: &forgejo_api::structs::Activity) -> eyre::Result
             }
         }
         ActivityOpType::RenameRepo => {
-            let repo = repo?;
             let content = content?;
-            let full_name = repo
-                .full_name
-                .as_deref()
-                .ok_or_eyre("repo does not have full name")?;
+            let full_name = repo_name(repo?)?;
             println!("{bold}{actor_name}{reset} renamed repository from {bold}{yellow}\"{content}\"{reset} to {bold}{yellow}{full_name}{reset}");
         }
         ActivityOpType::StarRepo => {
-            let repo = repo?;
-            let full_name = repo
-                .full_name
-                .as_deref()
-                .ok_or_eyre("repo does not have full name")?;
+            let full_name = repo_name(repo?)?;
             println!(
                 "{bold}{actor_name}{reset} starred repository {bold}{yellow}{full_name}{reset}"
             );
         }
         ActivityOpType::WatchRepo => {
-            let repo = repo?;
-            let full_name = repo
-                .full_name
-                .as_deref()
-                .ok_or_eyre("repo does not have full name")?;
+            let full_name = repo_name(repo?)?;
             println!(
                 "{bold}{actor_name}{reset} watched repository {bold}{yellow}{full_name}{reset}"
             );
         }
         ActivityOpType::CommitRepo => {
-            let repo = repo?;
-            let full_name = repo
-                .full_name
-                .as_deref()
-                .ok_or_eyre("repo does not have full name")?;
+            let full_name = repo_name(repo?)?;
             let ref_name = ref_name?;
             let branch = ref_name.strip_prefix("refs/heads/").unwrap_or(ref_name);
             if !content?.is_empty() {
@@ -820,20 +801,12 @@ pub fn print_activity(activity: &forgejo_api::structs::Activity) -> eyre::Result
             );
         }
         ActivityOpType::TransferRepo => {
-            let repo = repo?;
-            let full_name = repo
-                .full_name
-                .as_deref()
-                .ok_or_eyre("repo does not have full name")?;
+            let full_name = repo_name(repo?)?;
             let content = content?;
-            println!("{bold}{actor_name}{reset} transfered repository {bold}{yellow}{content}{reset} to {bold}{yellow}{full_name}{reset}");
+            println!("{bold}{actor_name}{reset} transferred repository {bold}{yellow}{content}{reset} to {bold}{yellow}{full_name}{reset}");
         }
         ActivityOpType::PushTag => {
-            let repo = repo?;
-            let full_name = repo
-                .full_name
-                .as_deref()
-                .ok_or_eyre("repo does not have full name")?;
+            let full_name = repo_name(repo?)?;
             let ref_name = ref_name?;
             let tag = ref_name.strip_prefix("refs/heads/").unwrap_or(ref_name);
             println!("{bold}{actor_name}{reset} pushed tag {bold}{bright_cyan}{tag}{reset} to {bold}{yellow}{full_name}{reset}");
@@ -871,21 +844,13 @@ pub fn print_activity(activity: &forgejo_api::structs::Activity) -> eyre::Result
             );
         }
         ActivityOpType::DeleteTag => {
-            let repo = repo?;
-            let full_name = repo
-                .full_name
-                .as_deref()
-                .ok_or_eyre("repo does not have full name")?;
+            let full_name = repo_name(repo?)?;
             let ref_name = ref_name?;
             let tag = ref_name.strip_prefix("refs/heads/").unwrap_or(ref_name);
             println!("{bold}{actor_name}{reset} deleted tag {bold}{bright_cyan}{tag}{reset} from {bold}{yellow}{full_name}{reset}");
         }
         ActivityOpType::DeleteBranch => {
-            let repo = repo?;
-            let full_name = repo
-                .full_name
-                .as_deref()
-                .ok_or_eyre("repo does not have full name")?;
+            let full_name = repo_name(repo?)?;
             let ref_name = ref_name?;
             let branch = ref_name.strip_prefix("refs/heads/").unwrap_or(ref_name);
             println!("{bold}{actor_name}{reset} deleted branch {bold}{bright_cyan}{branch}{reset} from {bold}{yellow}{full_name}{reset}");
@@ -908,11 +873,7 @@ pub fn print_activity(activity: &forgejo_api::structs::Activity) -> eyre::Result
             println!("{bold}{actor_name}{reset} commented on pull request {bold}{yellow}{name}#{id}{reset}");
         }
         ActivityOpType::PublishRelease => {
-            let repo = repo?;
-            let full_name = repo
-                .full_name
-                .as_deref()
-                .ok_or_eyre("repo does not have full name")?;
+            let full_name = repo_name(repo?)?;
             let content = content?;
             println!("{bold}{actor_name}{reset} created release {bold}{bright_cyan}\"{content}\"{reset} to {bold}{yellow}{full_name}{reset}");
         }
@@ -1042,8 +1003,8 @@ async fn edit_location(
     Ok(())
 }
 
-async fn edit_activity(api: &Forgejo, visibility: VisbilitySetting) -> eyre::Result<()> {
-    let hidden = visibility == VisbilitySetting::Hidden;
+async fn edit_activity(api: &Forgejo, visibility: VisibilitySetting) -> eyre::Result<()> {
+    let hidden = visibility == VisibilitySetting::Hidden;
     let opt = forgejo_api::structs::UserSettingsOptions {
         hide_activity: Some(hidden),
         ..default_settings_opt()
@@ -1059,13 +1020,13 @@ async fn edit_activity(api: &Forgejo, visibility: VisbilitySetting) -> eyre::Res
 
 async fn edit_email(
     api: &Forgejo,
-    visibility: Option<VisbilitySetting>,
+    visibility: Option<VisibilitySetting>,
     add: Vec<String>,
     rm: Vec<String>,
 ) -> eyre::Result<()> {
     if let Some(vis) = visibility {
         let opt = forgejo_api::structs::UserSettingsOptions {
-            hide_activity: Some(vis == VisbilitySetting::Hidden),
+            hide_activity: Some(vis == VisibilitySetting::Hidden),
             ..default_settings_opt()
         };
         api.update_user_settings(opt).await?;
@@ -1561,4 +1522,58 @@ async fn verify_gpg(api: &Forgejo, id: i64) -> eyre::Result<()> {
     crate::output::success("GPG key verified");
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn repo_with_name(full_name: Option<&str>) -> forgejo_api::structs::Repository {
+        // Every field with a custom serde deserializer must be present.
+        let mut repo: forgejo_api::structs::Repository = serde_json::from_value(serde_json::json!({
+            "archived_at": null,
+            "avatar_url": null,
+            "clone_url": null,
+            "created_at": null,
+            "html_url": null,
+            "languages_url": null,
+            "mirror_updated": null,
+            "original_url": null,
+            "ssh_url": null,
+            "updated_at": null,
+            "url": null
+        }))
+        .unwrap();
+        repo.full_name = full_name.map(str::to_owned);
+        repo
+    }
+
+    #[test]
+    fn issue_name_parses_json_array_content() {
+        let repo = repo_with_name(Some("alice/repo"));
+        let (name, id) = issue_name(&repo, r#"["7","Some issue title"]"#).unwrap();
+        assert_eq!(name, "alice/repo");
+        assert_eq!(id, "7");
+    }
+
+    #[test]
+    fn issue_name_parses_legacy_pipe_content() {
+        let repo = repo_with_name(Some("alice/repo"));
+        let (name, id) = issue_name(&repo, "8|Old style title").unwrap();
+        assert_eq!(name, "alice/repo");
+        assert_eq!(id, "8");
+    }
+
+    #[test]
+    fn issue_name_falls_back_to_bare_content() {
+        let repo = repo_with_name(Some("alice/repo"));
+        let (_, id) = issue_name(&repo, "9").unwrap();
+        assert_eq!(id, "9");
+    }
+
+    #[test]
+    fn repo_name_errors_without_full_name() {
+        let repo = repo_with_name(None);
+        assert!(repo_name(&repo).is_err());
+    }
 }

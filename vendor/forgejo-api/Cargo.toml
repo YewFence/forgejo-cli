@@ -1,0 +1,85 @@
+# Vendored copy of forgejo-api 0.11.0 (https://codeberg.org/Cyborus/forgejo-api),
+# applied via [patch.crates-io] in the workspace Cargo.toml. See PATCHES.md for
+# the local modifications and when this vendor copy can be removed.
+#
+# Test targets and dev-dependencies from the published manifest are omitted
+# because the crate's test suite is not vendored.
+
+[package]
+edition = "2021"
+name = "forgejo-api"
+version = "0.11.0"
+build = false
+autolib = false
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
+description = "Interface to Forgejo's Web API"
+readme = "README.md"
+license = "Apache-2.0 OR MIT"
+repository = "https://codeberg.org/Cyborus/forgejo-api"
+
+[features]
+default = ["reqwest/default-tls"]
+rustls-tls = ["reqwest/rustls-tls"]
+sync = ["reqwest/blocking"]
+
+[lib]
+name = "forgejo_api"
+path = "src/lib.rs"
+
+[dependencies.base64ct]
+version = "1.6.0"
+
+[dependencies.bytes]
+version = "1.5.0"
+
+[dependencies.futures]
+version = "0.3.31"
+
+[dependencies.reqwest]
+version = "0.12"
+features = [
+    "charset",
+    "http2",
+    "macos-system-configuration",
+    "json",
+    "multipart",
+]
+default-features = false
+
+[dependencies.serde]
+version = "1.0.168"
+features = ["derive"]
+
+[dependencies.serde_json]
+version = "1.0.108"
+
+[dependencies.soft_assert]
+version = "0.1.1"
+
+[dependencies.thiserror]
+version = "1.0.43"
+
+[dependencies.time]
+version = "0.3.26"
+features = [
+    "parsing",
+    "serde",
+    "formatting",
+]
+
+[dependencies.tokio]
+version = "1.29.1"
+features = ["net"]
+
+[dependencies.url]
+version = "2.4.0"
+features = ["serde"]
+
+[dependencies.urlencoding]
+version = "2.1.3"
+
+[dependencies.zeroize]
+version = "1.7.0"

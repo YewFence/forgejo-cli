@@ -20,7 +20,9 @@ fn mock_org_obj(id: i64, name: &str) -> serde_json::Value {
         "location": "Internet",
         "website": "https://example.com",
         "visibility": "public",
-        "repo_admin_change_team_access": false
+        "repo_admin_change_team_access": false,
+        // forgejo-api 0.11 requires this key to be present (no serde default)
+        "created": "2024-01-01T00:00:00Z"
     })
 }
 

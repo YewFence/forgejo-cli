@@ -31,7 +31,7 @@ Destructive commands also accept:
 
 ```bash
 fj auth login                    # OAuth browser flow
-fj auth add-key <user> <token>   # Direct token (stdin if omitted)
+fj auth add-key <token>          # Direct token (stdin if omitted)
 fj auth logout <host>            # Log out from instance
 fj auth list                     # Show logged-in instances
 fj auth use-ssh [true|false]     # Toggle SSH as default for current instance

@@ -1,7 +1,7 @@
 mod common;
 
 use predicates::prelude::*;
-use wiremock::matchers::{method, path};
+use wiremock::matchers::{body_partial_json, method, path};
 use wiremock::{Mock, ResponseTemplate};
 
 // ---------------------------------------------------------------------------
@@ -78,6 +78,54 @@ async fn repo_view_json() {
         .assert()
         .success()
         .stdout(predicate::str::contains("\"full_name\": \"alice/my-repo\""));
+}
+
+#[tokio::test]
+async fn repo_view_archived_warning() {
+    let instance = common::TestInstance::start().await;
+
+    let mut repo = mock_repo_json("alice", "my-repo");
+    repo["archived"] = serde_json::json!(true);
+    repo["archived_at"] = serde_json::json!("2024-01-15T12:00:00Z");
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/alice/my-repo"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(repo))
+        .mount(&instance.server)
+        .await;
+
+    instance
+        .fj()
+        .args(["repo", "view", "alice/my-repo"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Repo archived since January 15, 2024",
+        ))
+        .stdout(predicate::str::contains("interactions are disabled"));
+}
+
+#[tokio::test]
+async fn repo_view_json_omits_archived_warning() {
+    let instance = common::TestInstance::start().await;
+
+    let mut repo = mock_repo_json("alice", "my-repo");
+    repo["archived"] = serde_json::json!(true);
+    repo["archived_at"] = serde_json::json!("2024-01-15T12:00:00Z");
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/alice/my-repo"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(repo))
+        .mount(&instance.server)
+        .await;
+
+    instance
+        .fj()
+        .args(["--json", "repo", "view", "alice/my-repo"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"archived\": true"))
+        .stdout(predicate::str::contains("interactions are disabled").not());
 }
 
 #[tokio::test]
@@ -192,16 +240,167 @@ async fn repo_migrate() {
         .stderr(predicate::str::contains("Done! View online at"));
 }
 
+#[tokio::test]
+async fn repo_migrate_with_owner() {
+    let instance = common::TestInstance::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/api/v1/repos/migrate"))
+        .and(body_partial_json(serde_json::json!({
+            "repo_owner": "someorg",
+            "repo_name": "my-mirror"
+        })))
+        .respond_with(
+            ResponseTemplate::new(201).set_body_json(mock_repo_json("someorg", "my-mirror")),
+        )
+        .expect(1)
+        .mount(&instance.server)
+        .await;
+
+    instance
+        .fj()
+        .args([
+            "repo",
+            "migrate",
+            "https://github.com/example/repo",
+            "someorg/my-mirror",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Done! View online at"));
+}
+
+// ===========================================================================
+// Edit / Units
+// ===========================================================================
+
+#[tokio::test]
+async fn repo_edit_description() {
+    let instance = common::TestInstance::start().await;
+
+    Mock::given(method("PATCH"))
+        .and(path("/api/v1/repos/alice/my-repo"))
+        .and(body_partial_json(serde_json::json!({
+            "description": "new desc",
+            "private": null,
+            "name": null
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(mock_repo_json("alice", "my-repo")))
+        .expect(1)
+        .mount(&instance.server)
+        .await;
+
+    instance
+        .fj()
+        .args([
+            "repo",
+            "edit",
+            "--repo",
+            "alice/my-repo",
+            "--description",
+            "new desc",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Edited repository alice/my-repo"));
+}
+
+#[tokio::test]
+async fn repo_units_disable_issues() {
+    let instance = common::TestInstance::start().await;
+
+    Mock::given(method("PATCH"))
+        .and(path("/api/v1/repos/alice/my-repo"))
+        .and(body_partial_json(serde_json::json!({
+            "has_issues": false,
+            "has_wiki": null
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(mock_repo_json("alice", "my-repo")))
+        .expect(1)
+        .mount(&instance.server)
+        .await;
+
+    instance
+        .fj()
+        .args([
+            "repo",
+            "units",
+            "--repo",
+            "alice/my-repo",
+            "issues",
+            "--enable",
+            "false",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains(
+            "Updated issues unit for alice/my-repo",
+        ));
+}
+
+#[tokio::test]
+async fn repo_units_no_flags_shows_status_without_patching() {
+    let instance = common::TestInstance::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/alice/my-repo"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(mock_repo_json("alice", "my-repo")))
+        .expect(1)
+        .mount(&instance.server)
+        .await;
+
+    Mock::given(method("PATCH"))
+        .and(path("/api/v1/repos/alice/my-repo"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(mock_repo_json("alice", "my-repo")))
+        .expect(0)
+        .mount(&instance.server)
+        .await;
+
+    instance
+        .fj()
+        .args(["repo", "units", "--repo", "alice/my-repo", "issues"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "issues unit is enabled for alice/my-repo",
+        ));
+}
+
 // ===========================================================================
 // Readme
 // ===========================================================================
+
+fn contents_entry(name: &str, kind: &str) -> serde_json::Value {
+    serde_json::json!({
+        "name": name,
+        "path": name,
+        "type": kind,
+        "size": 42,
+        "download_url": null,
+        "html_url": null,
+        "git_url": null,
+        "url": null,
+        "last_commit_when": "2024-01-01T00:00:00Z",
+        "submodule_git_url": null
+    })
+}
 
 #[tokio::test]
 async fn repo_readme() {
     let instance = common::TestInstance::start().await;
 
-    // The readme command tries "README.md" first via
-    // GET /api/v1/repos/{owner}/{repo}/raw/{filepath}
+    // The readme command lists the repo contents to find the readme file,
+    // then fetches it via GET /api/v1/repos/{owner}/{repo}/raw/{filepath}.
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/alice/my-repo/contents"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!([contents_entry("README.md", "file")])),
+        )
+        .expect(1)
+        .mount(&instance.server)
+        .await;
+
     Mock::given(method("GET"))
         .and(path("/api/v1/repos/alice/my-repo/raw/README.md"))
         .respond_with(
@@ -217,6 +416,57 @@ async fn repo_readme() {
         .assert()
         .success()
         .stdout(predicate::str::contains("Hello World"));
+}
+
+#[tokio::test]
+async fn repo_readme_nonstandard_casing() {
+    let instance = common::TestInstance::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/alice/my-repo/contents"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            contents_entry("src", "dir"),
+            contents_entry("ReadMe.MD", "file")
+        ])))
+        .expect(1)
+        .mount(&instance.server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/alice/my-repo/raw/ReadMe.MD"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("# Cased Readme"))
+        .expect(1)
+        .mount(&instance.server)
+        .await;
+
+    instance
+        .fj()
+        .args(["repo", "readme", "alice/my-repo"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Cased Readme"));
+}
+
+#[tokio::test]
+async fn repo_readme_missing() {
+    let instance = common::TestInstance::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/alice/my-repo/contents"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            contents_entry("src", "dir"),
+            contents_entry("main.rs", "file")
+        ])))
+        .expect(1)
+        .mount(&instance.server)
+        .await;
+
+    instance
+        .fj()
+        .args(["repo", "readme", "alice/my-repo"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Repo does not have a README"));
 }
 
 // ===========================================================================

@@ -16,9 +16,13 @@ Commands:
   reopen    Reopen a closed pull request
   merge     Merge a pull request
   browse    Open a pull request in your browser
+  review    View the review on a pull request
+  assign    Assign users to a pull request
+  unassign  Unassign users from a pull request
   help      Print this message or the help of the given subcommand(s)
 
 Options:
+  -H, --host <HOST>      
   -R, --remote <REMOTE>  The local git remote that points to the repo to operate on
   -y, --yes              Skip all confirmation prompts (auto-confirm destructive actions)
   -v, --verbose          Show verbose output (API calls, resolution steps)

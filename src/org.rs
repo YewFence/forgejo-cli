@@ -305,7 +305,7 @@ async fn view_org(api: &Forgejo, name: String) -> eyre::Result<()> {
 
 async fn create_org(api: &Forgejo, name: String, options: OrgOptions) -> eyre::Result<()> {
     if !name.chars().all(is_valid_name_char) {
-        eyre::bail!("Organization names can only have alphanumeric characters, dash, underscore, or period. \n  If you want a name with other characters, try setting the --full-name flag");
+        eyre::bail!("Organization names can only have alphanumeric characters, dashes, underscores, or periods. \n  If you want a name with other characters, try setting the --full-name flag");
     }
     if !name
         .chars()
@@ -325,7 +325,7 @@ async fn create_org(api: &Forgejo, name: String, options: OrgOptions) -> eyre::R
     while let Some(c) = chars.next() {
         // because of the prior check, if it isn't alphanumeric, it's definitely one of - _ or .
         if !c.is_alphanumeric() && !chars.peek().is_some_and(|c| c.is_alphanumeric()) {
-            eyre::bail!("Organization names can't have consecutive non-alphanumberic characters.\n  If you want that in the name, try setting the --full-name flag");
+            eyre::bail!("Organization names can't have consecutive non-alphanumeric characters.\n  If you want that in the name, try setting the --full-name flag");
         }
     }
     let opt = CreateOrgOption {

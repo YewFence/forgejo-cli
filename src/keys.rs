@@ -38,7 +38,7 @@ impl KeyInfo {
         let this = match json {
             Ok(x) => serde_json::from_slice::<Self>(&x)?,
             Err(e) if e.kind() == ErrorKind::NotFound => {
-                crate::output::info("keys file not found, creating");
+                crate::output::info("keys file not found, starting with empty keys");
                 Self::default()
             }
             Err(e) => return Err(e.into()),
@@ -52,14 +52,18 @@ impl KeyInfo {
 
         tokio::fs::create_dir_all(&path).await?;
 
-        let mut file = tokio::fs::File::create(path.join("keys.json")).await?;
+        let mut options = std::fs::OpenOptions::new();
+        options.create(true).write(true).truncate(true);
+
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
-            // read+write for user, nothing for everyone else
-            file.set_permissions(std::fs::Permissions::from_mode(0o600))
-                .await?;
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
         }
+
+        let mut file = tokio::fs::OpenOptions::from(options)
+            .open(path.join("keys.json"))
+            .await?;
         file.write_all(&json).await?;
 
         Ok(())
@@ -75,7 +79,13 @@ impl KeyInfo {
         match self.get_login(url) {
             Some(login) => {
                 crate::verbose_log!("Using saved login for {}", crate::host_name(url));
-                login.api_for(url).await
+                let was_refreshed = login.refresh(url).await?;
+                let api = login.api_for(url).await?;
+                if was_refreshed {
+                    crate::verbose_log!("Refreshed OAuth token for {}", crate::host_name(url));
+                    self.save().await?;
+                }
+                Ok(api)
             }
             None => {
                 crate::verbose_log!(
@@ -108,11 +118,9 @@ impl KeyInfo {
 #[serde(tag = "type")]
 pub enum LoginInfo {
     Application {
-        name: String,
         token: String,
     },
     OAuth {
-        name: String,
         token: String,
         refresh_token: String,
         expires_at: time::OffsetDateTime,
@@ -120,50 +128,47 @@ pub enum LoginInfo {
 }
 
 impl LoginInfo {
-    pub fn username(&self) -> &str {
-        match self {
-            LoginInfo::Application { name, .. } => name,
-            LoginInfo::OAuth { name, .. } => name,
+    async fn refresh(&mut self, url: &Url) -> eyre::Result<bool> {
+        if let LoginInfo::OAuth {
+            token,
+            refresh_token,
+            expires_at,
+            ..
+        } = self
+        {
+            if time::OffsetDateTime::now_utc() >= *expires_at {
+                let api = Forgejo::with_user_agent(Auth::None, url.clone(), crate::USER_AGENT)?;
+                let client_id = crate::auth::get_client_info_for(url)
+                    .await?
+                    .ok_or_else(|| eyre::eyre!("Can't refresh token: no client info for {url}."))?;
+                let response = api
+                    .oauth_get_access_token(forgejo_api::structs::OAuthTokenRequest::Refresh {
+                        refresh_token,
+                        client_id: &client_id,
+                        client_secret: "",
+                    })
+                    .await?;
+                *token = response.access_token;
+                *refresh_token = response.refresh_token;
+                // A minute less, in case any weirdness happens at the exact moment it
+                // expires. Better to refresh slightly too soon than slightly too late.
+                let expires_in =
+                    std::time::Duration::from_secs(response.expires_in.saturating_sub(60) as u64);
+                *expires_at = time::OffsetDateTime::now_utc() + expires_in;
+                return Ok(true);
+            }
         }
+        Ok(false)
     }
 
-    pub async fn api_for(&mut self, url: &Url) -> eyre::Result<Forgejo> {
+    pub async fn api_for(&self, url: &Url) -> eyre::Result<Forgejo> {
         match self {
             LoginInfo::Application { token, .. } => {
                 let api =
                     Forgejo::with_user_agent(Auth::Token(token), url.clone(), crate::USER_AGENT)?;
                 Ok(api)
             }
-            LoginInfo::OAuth {
-                token,
-                refresh_token,
-                expires_at,
-                ..
-            } => {
-                if time::OffsetDateTime::now_utc() >= *expires_at {
-                    let api = Forgejo::with_user_agent(Auth::None, url.clone(), crate::USER_AGENT)?;
-                    let client_id =
-                        crate::auth::get_client_info_for(url)
-                            .await?
-                            .ok_or_else(|| {
-                                eyre::eyre!("Can't refresh token: no client info for {url}.")
-                            })?;
-                    let response = api
-                        .oauth_get_access_token(forgejo_api::structs::OAuthTokenRequest::Refresh {
-                            refresh_token,
-                            client_id: &client_id,
-                            client_secret: "",
-                        })
-                        .await?;
-                    *token = response.access_token;
-                    *refresh_token = response.refresh_token;
-                    // A minute less, in case any weirdness happens at the exact moment it
-                    // expires. Better to refresh slightly too soon than slightly too late.
-                    let expires_in = std::time::Duration::from_secs(
-                        response.expires_in.saturating_sub(60) as u64,
-                    );
-                    *expires_at = time::OffsetDateTime::now_utc() + expires_in;
-                }
+            LoginInfo::OAuth { token, .. } => {
                 let api =
                     Forgejo::with_user_agent(Auth::Token(token), url.clone(), crate::USER_AGENT)?;
                 Ok(api)
@@ -205,5 +210,24 @@ mod tests {
         let url = Url::parse("https://git.example.com/").unwrap();
         let result = keys.deref_alias(url.clone());
         assert_eq!(result, url);
+    }
+
+    #[test]
+    fn login_info_ignores_legacy_name_field() {
+        // keys.json files written before the username removal (a5831f5)
+        // still contain a "name" field; loading them must keep working.
+        let json = r#"{"type":"Application","name":"alice","token":"token123"}"#;
+        let login: LoginInfo = serde_json::from_str(json).unwrap();
+        assert!(matches!(login, LoginInfo::Application { .. }));
+    }
+
+    #[tokio::test]
+    async fn refresh_is_noop_for_application_logins() {
+        let mut login = LoginInfo::Application {
+            token: "token123".into(),
+        };
+        let url = Url::parse("https://git.example.com/").unwrap();
+        let was_refreshed = login.refresh(&url).await.unwrap();
+        assert!(!was_refreshed);
     }
 }

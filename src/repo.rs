@@ -1,9 +1,8 @@
 use std::{io::Write, path::PathBuf, str::FromStr};
 
 use clap::{Args, Subcommand};
-use eyre::{eyre, OptionExt, Result};
+use eyre::{eyre, Context, OptionExt, Result};
 use forgejo_api::{structs::CreateRepoOption, Forgejo};
-use ssh2_config::ParseRule;
 use url::Url;
 
 use crate::{DisplayOptional, SpecialRender};
@@ -86,7 +85,7 @@ impl RepoInfo {
                 if name.is_none() {
                     let all_remotes = local_repo.remotes()?;
                     if all_remotes.len() == 1 {
-                        if let Some(remote_name) = all_remotes.get(0) {
+                        if let Ok(Some(remote_name)) = all_remotes.get(0) {
                             name = Some(remote_name.to_owned());
                         }
                     }
@@ -95,11 +94,10 @@ impl RepoInfo {
                 // if the current branch is tracking a remote branch, use that remote
                 if name.is_none() {
                     let head = local_repo.head()?;
-                    let branch_name = head.name().ok_or_eyre("branch name not UTF-8")?;
+                    let branch_name = head.name().wrap_err("branch name not UTF-8")?;
 
                     if let Ok(remote_name) = local_repo.branch_upstream_remote(branch_name) {
-                        let remote_name_s =
-                            remote_name.as_str().ok_or_eyre("remote name invalid")?;
+                        let remote_name_s = remote_name.as_str().wrap_err("remote name invalid")?;
 
                         if let Some(host_url) = &host_url {
                             let remote = local_repo.find_remote(remote_name_s)?;
@@ -126,12 +124,12 @@ impl RepoInfo {
                     if let Some(host_url) = &host_url {
                         let all_remotes = local_repo.remotes()?;
                         for remote_name in all_remotes.iter() {
-                            let Some(remote_name) = remote_name else {
+                            let Ok(Some(remote_name)) = remote_name else {
                                 continue;
                             };
                             let remote = local_repo.find_remote(remote_name)?;
 
-                            if let Some(url) = remote.url() {
+                            if let Ok(url) = remote.url() {
                                 let url = crate::ssh_url_parse(url)?;
                                 let (url, _) = url_strip_repo_name(url)?;
                                 let url = keys.deref_alias(url);
@@ -151,7 +149,10 @@ impl RepoInfo {
                 // remote, matching behavior of git push, gh, etc.
                 if name.is_none() {
                     let all_remotes = local_repo.remotes()?;
-                    if all_remotes.iter().any(|r| r == Some("origin")) {
+                    if all_remotes
+                        .iter()
+                        .any(|r| matches!(r, Ok(Some("origin"))))
+                    {
                         name = Some("origin".to_owned());
                         crate::verbose_log!("Multiple remotes found, falling back to 'origin'");
                     }
@@ -223,7 +224,7 @@ impl RepoInfo {
 
 If you're trying to operate on a repository in the current directory, try adding a remote
 referencing the forgejo instance. If you have multiple remotes, try setting one as upstream to the
-current branch. You may also specify a host explictly using the `--host` argument."
+current branch. You may also specify a host explicitly using the `--host` argument."
             ),
         };
 
@@ -382,10 +383,12 @@ pub enum RepoCommand {
         #[clap(long, short = 'R')]
         remote: Option<String>,
     },
+    /// Migrate or mirror an existing repository
     Migrate {
         /// URL of the repo to migrate
         repo: String,
-        /// Name of the new mirror
+        /// Name of the new mirror, and optionally which org/user should own it.
+        #[clap(id = "[OWNER]/NAME")]
         name: String,
         /// Whether to mirror the repo instead of migrating it
         #[clap(long, short)]
@@ -483,7 +486,100 @@ pub enum RepoCommand {
         #[clap(subcommand)]
         cmd: LabelsSubcommand,
     },
+
+    /// Edit a repository's properties
+    Edit {
+        /// The repo to edit
+        #[clap(long, short = 'r')]
+        repo: Option<RepoArg>,
+
+        /// Archive or unarchive
+        #[clap(short, long)]
+        archived: Option<bool>,
+
+        /// Set the default branch
+        #[clap(long)]
+        default_branch: Option<String>,
+
+        /// Set the description
+        #[clap(short, long)]
+        description: Option<String>,
+
+        /// Remove obsolete remote-tracking references when mirroring
+        #[clap(long)]
+        enable_prune: Option<bool>,
+
+        /// Set the interval for push mirrors. Use a string like 8h30m0s
+        #[clap(long)]
+        mirror_interval: Option<String>,
+
+        /// Set the repo's name
+        #[clap(long)]
+        name: Option<String>,
+
+        /// Set this repository's private status
+        #[clap(short, long)]
+        private: Option<bool>,
+
+        /// Set if this repository should be a template repository
+        #[clap(short, long)]
+        template: Option<bool>,
+
+        /// Set a URL for this repository's website
+        #[clap(short, long)]
+        website: Option<String>,
+    },
+
+    /// Manage a repo's units
+    #[clap(alias = "unit")]
+    Units {
+        /// The repo whose units to manage
+        #[clap(long, short = 'r')]
+        repo: Option<RepoArg>,
+
+        #[clap(subcommand)]
+        cmd: UnitsSubcommand,
+    },
 }
+
+// TODO: EditRepoOption should probably implement Default upstream.
+const NOOP_EDIT_REPO_OPTION: forgejo_api::structs::EditRepoOption =
+    forgejo_api::structs::EditRepoOption {
+        allow_fast_forward_only_merge: None,
+        allow_manual_merge: None,
+        allow_merge_commits: None,
+        allow_rebase: None,
+        allow_rebase_explicit: None,
+        allow_rebase_update: None,
+        allow_squash_merge: None,
+        archived: None,
+        autodetect_manual_merge: None,
+        default_allow_maintainer_edit: None,
+        default_branch: None,
+        default_delete_branch_after_merge: None,
+        default_merge_style: None,
+        default_update_style: None,
+        description: None,
+        enable_prune: None,
+        external_tracker: None,
+        external_wiki: None,
+        globally_editable_wiki: None,
+        has_actions: None,
+        has_issues: None,
+        has_packages: None,
+        has_projects: None,
+        has_pull_requests: None,
+        has_releases: None,
+        has_wiki: None,
+        ignore_whitespace_conflicts: None,
+        internal_tracker: None,
+        mirror_interval: None,
+        name: None,
+        private: None,
+        template: None,
+        website: None,
+        wiki_branch: None,
+    };
 
 impl RepoCommand {
     pub async fn run(self, keys: &mut crate::KeyInfo, host_name: Option<&str>) -> eyre::Result<()> {
@@ -750,6 +846,192 @@ impl RepoCommand {
                 )
                 .await?;
             }
+            RepoCommand::Edit {
+                repo,
+                archived,
+                default_branch,
+                description,
+                enable_prune,
+                mirror_interval,
+                name,
+                private,
+                template,
+                website,
+            } => {
+                let repo = RepoInfo::get_current(host_name, repo.as_ref(), None, keys)?;
+                let api = keys.get_api(repo.host_url()).await?;
+                let repo = repo
+                    .name()
+                    .ok_or_eyre("couldn't get repo name, please specify")?;
+
+                crate::verbose_log!("Editing repo {}/{}", repo.owner(), repo.name());
+                api.repo_edit(
+                    repo.owner(),
+                    repo.name(),
+                    forgejo_api::structs::EditRepoOption {
+                        archived,
+                        default_branch,
+                        description,
+                        enable_prune,
+                        mirror_interval,
+                        name,
+                        private,
+                        template,
+                        website,
+                        ..NOOP_EDIT_REPO_OPTION
+                    },
+                )
+                .await?;
+                crate::output::success(&format!(
+                    "Edited repository {}/{}",
+                    repo.owner(),
+                    repo.name()
+                ));
+            }
+            RepoCommand::Units { repo, cmd } => {
+                let repo = RepoInfo::get_current(host_name, repo.as_ref(), None, keys)?;
+                let api = keys.get_api(repo.host_url()).await?;
+                let repo = repo
+                    .name()
+                    .ok_or_eyre("couldn't get repo name, please specify")?;
+
+                let unit_name = match &cmd {
+                    UnitsSubcommand::Issues { .. } => "issues",
+                    UnitsSubcommand::Prs { .. } => "pull requests",
+                    UnitsSubcommand::Actions { .. } => "actions",
+                    UnitsSubcommand::Wiki { .. } => "wiki",
+                    UnitsSubcommand::Packages { .. } => "packages",
+                    UnitsSubcommand::Projects { .. } => "projects",
+                    UnitsSubcommand::Releases { .. } => "releases",
+                };
+
+                let edit_option = match cmd {
+                    UnitsSubcommand::Issues { enable } => forgejo_api::structs::EditRepoOption {
+                        has_issues: enable,
+                        ..NOOP_EDIT_REPO_OPTION
+                    },
+                    UnitsSubcommand::Prs {
+                        enable,
+                        allow_fast_forward_only_merge,
+                        allow_manual_merge,
+                        allow_merge_commits,
+                        allow_rebase,
+                        allow_rebase_explicit,
+                        allow_rebase_update,
+                        allow_squash_merge,
+                        autodetect_manual_merge,
+                        default_allow_maintainer_edit,
+                        default_delete_branch_after_merge,
+                        default_merge_style,
+                        default_update_style,
+                        ignore_whitespace_conflicts,
+                    } => forgejo_api::structs::EditRepoOption {
+                        has_pull_requests: enable,
+                        allow_fast_forward_only_merge,
+                        allow_manual_merge,
+                        allow_merge_commits,
+                        allow_rebase,
+                        allow_rebase_explicit,
+                        allow_rebase_update,
+                        allow_squash_merge,
+                        autodetect_manual_merge,
+                        default_allow_maintainer_edit,
+                        default_delete_branch_after_merge,
+                        default_merge_style: default_merge_style
+                            .map(DefaultMergeStyle::to_forgejo_api),
+                        default_update_style: default_update_style
+                            .map(DefaultUpdateStyle::to_forgejo_api)
+                            .map(String::from),
+                        ignore_whitespace_conflicts,
+                        ..NOOP_EDIT_REPO_OPTION
+                    },
+                    UnitsSubcommand::Actions { enable } => forgejo_api::structs::EditRepoOption {
+                        has_actions: enable,
+                        ..NOOP_EDIT_REPO_OPTION
+                    },
+                    UnitsSubcommand::Wiki {
+                        enable,
+                        branch,
+                        external_url: external_wiki,
+                        globally_editable,
+                    } => forgejo_api::structs::EditRepoOption {
+                        has_wiki: enable,
+                        wiki_branch: branch,
+                        external_wiki: external_wiki.map(|url| {
+                            forgejo_api::structs::ExternalWiki {
+                                // Setting this to None always results in a server-side
+                                // error.
+                                // See: https://codeberg.org/Cyborus/forgejo-api/issues/143
+                                external_wiki_url: Some(url),
+                            }
+                        }),
+                        globally_editable_wiki: globally_editable,
+                        ..NOOP_EDIT_REPO_OPTION
+                    },
+                    UnitsSubcommand::Packages { enable } => forgejo_api::structs::EditRepoOption {
+                        has_packages: enable,
+                        ..NOOP_EDIT_REPO_OPTION
+                    },
+                    UnitsSubcommand::Projects { enable } => forgejo_api::structs::EditRepoOption {
+                        has_projects: enable,
+                        ..NOOP_EDIT_REPO_OPTION
+                    },
+                    UnitsSubcommand::Releases { enable } => forgejo_api::structs::EditRepoOption {
+                        has_releases: enable,
+                        ..NOOP_EDIT_REPO_OPTION
+                    },
+                };
+
+                if edit_option == NOOP_EDIT_REPO_OPTION {
+                    crate::verbose_log!(
+                        "No changes requested; fetching {unit_name} unit status for {}/{}",
+                        repo.owner(),
+                        repo.name()
+                    );
+                    let repo_data = api.repo_get(repo.owner(), repo.name()).await?;
+                    let enabled = match unit_name {
+                        "issues" => repo_data.has_issues,
+                        "pull requests" => repo_data.has_pull_requests,
+                        "actions" => repo_data.has_actions,
+                        "wiki" => repo_data.has_wiki,
+                        "packages" => repo_data.has_packages,
+                        "projects" => repo_data.has_projects,
+                        "releases" => repo_data.has_releases,
+                        _ => unreachable!("unit_name covers the same variants"),
+                    };
+                    let status = serde_json::json!({
+                        "unit": unit_name,
+                        "enabled": enabled,
+                    });
+                    crate::output::print_or_json(&status, || {
+                        let state = match enabled {
+                            Some(true) => "enabled",
+                            Some(false) => "disabled",
+                            None => "unknown",
+                        };
+                        println!(
+                            "{unit_name} unit is {state} for {}/{}",
+                            repo.owner(),
+                            repo.name()
+                        );
+                        Ok(())
+                    })?;
+                    return Ok(());
+                }
+
+                crate::verbose_log!(
+                    "Updating {unit_name} unit for {}/{}",
+                    repo.owner(),
+                    repo.name()
+                );
+                api.repo_edit(repo.owner(), repo.name(), edit_option)
+                    .await?;
+                crate::output::success(&format!(
+                    "Updated {unit_name} unit for {}/{}",
+                    repo.owner(),
+                    repo.name()
+                ));
+            }
         };
         Ok(())
     }
@@ -825,6 +1107,167 @@ pub enum LabelsSubcommand {
     },
 }
 
+#[derive(Subcommand, Clone, Debug)]
+pub enum UnitsSubcommand {
+    /// Manage the issues unit
+    #[clap(alias = "issue")]
+    Issues {
+        /// Enable or disable issues
+        #[clap(short, long)]
+        enable: Option<bool>,
+        // TODO: external_tracker, internal_tracker
+        // These accept quite sophisticated data structures, not sure how to model those.
+    },
+
+    /// Manage the pull requests unit
+    #[clap(alias = "pr")]
+    Prs {
+        /// Enable or disable pull requests
+        #[clap(short, long)]
+        enable: Option<bool>,
+
+        /// Allow fast-forward only merging
+        #[clap(long)]
+        allow_fast_forward_only_merge: Option<bool>,
+
+        /// Allow manual merging
+        #[clap(long)]
+        allow_manual_merge: Option<bool>,
+
+        /// Allow merge commits
+        #[clap(long)]
+        allow_merge_commits: Option<bool>,
+
+        /// Allow rebase merging
+        #[clap(long)]
+        allow_rebase: Option<bool>,
+
+        /// Allow rebase merging with explicit merge commits
+        #[clap(long)]
+        allow_rebase_explicit: Option<bool>,
+
+        /// Allow updating PR branches by rebase
+        #[clap(long)]
+        allow_rebase_update: Option<bool>,
+
+        /// Allow squash merging
+        #[clap(long)]
+        allow_squash_merge: Option<bool>,
+
+        /// Automatically detect manual merges
+        #[clap(long)]
+        autodetect_manual_merge: Option<bool>,
+
+        /// Allow maintainer edits by default
+        #[clap(long)]
+        default_allow_maintainer_edit: Option<bool>,
+
+        /// Delete branch after merge by default
+        #[clap(long)]
+        default_delete_branch_after_merge: Option<bool>,
+
+        /// Default merge style
+        #[clap(long)]
+        default_merge_style: Option<DefaultMergeStyle>,
+
+        /// Default update style
+        #[clap(long)]
+        default_update_style: Option<DefaultUpdateStyle>,
+
+        /// Ignore whitespace merge conflicts
+        #[clap(long)]
+        ignore_whitespace_conflicts: Option<bool>,
+    },
+
+    /// Manage the actions unit
+    Actions {
+        /// Enable or disable actions
+        #[clap(short, long)]
+        enable: Option<bool>,
+    },
+
+    /// Manage the wiki unit
+    Wiki {
+        /// Enable or disable the wiki
+        #[clap(short, long)]
+        enable: Option<bool>,
+
+        /// Set the branch used for the wiki
+        #[clap(long)]
+        branch: Option<String>,
+
+        /// Set the URL for an external wiki.
+        #[clap(long)]
+        external_url: Option<Url>,
+
+        /// Set the globally editable state of the wiki
+        #[clap(long)]
+        globally_editable: Option<bool>,
+    },
+
+    /// Manage the packages unit
+    #[clap(alias = "package")]
+    Packages {
+        /// Enable or disable the package registry
+        #[clap(short, long)]
+        enable: Option<bool>,
+    },
+
+    /// Manage the projects unit
+    #[clap(alias = "project")]
+    Projects {
+        /// Enable or disable the project board
+        #[clap(short, long)]
+        enable: Option<bool>,
+    },
+
+    /// Manage the releases unit
+    #[clap(alias = "release")]
+    Releases {
+        /// Enable or disable the releases unit
+        #[clap(short, long)]
+        enable: Option<bool>,
+    },
+}
+
+#[derive(clap::ValueEnum, Copy, Clone, Debug)]
+pub enum DefaultMergeStyle {
+    Merge,
+    Rebase,
+    RebaseMerge,
+    Squash,
+    FastForwardOnly,
+}
+
+impl DefaultMergeStyle {
+    fn to_forgejo_api(self) -> forgejo_api::structs::DefaultMergeStyle {
+        match self {
+            DefaultMergeStyle::Merge => forgejo_api::structs::DefaultMergeStyle::Merge,
+            DefaultMergeStyle::Rebase => forgejo_api::structs::DefaultMergeStyle::Rebase,
+            DefaultMergeStyle::RebaseMerge => forgejo_api::structs::DefaultMergeStyle::RebaseMerge,
+            DefaultMergeStyle::Squash => forgejo_api::structs::DefaultMergeStyle::Squash,
+            DefaultMergeStyle::FastForwardOnly => {
+                forgejo_api::structs::DefaultMergeStyle::FastForwardOnly
+            }
+        }
+    }
+}
+
+#[derive(clap::ValueEnum, Copy, Clone, Debug)]
+pub enum DefaultUpdateStyle {
+    Rebase,
+    Merge,
+}
+
+impl DefaultUpdateStyle {
+    fn to_forgejo_api(self) -> &'static str {
+        match self {
+            DefaultUpdateStyle::Rebase => "rebase",
+            DefaultUpdateStyle::Merge => "merge",
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn create_repo(
     api: &Forgejo,
@@ -883,7 +1326,7 @@ pub async fn create_repo(
             }
             let branch_shorthand = head
                 .shorthand()
-                .ok_or_else(|| eyre!("branch name invalid utf-8"))?
+                .wrap_err("branch name invalid utf-8")?
                 .to_owned();
             let branch_name = std::str::from_utf8(head.name_bytes())?.to_owned();
 
@@ -1088,6 +1531,11 @@ async fn migrate_repo(
         None
     };
 
+    let (owner, name) = name
+        .rsplit_once("/")
+        .map(|(o, n)| (Some(o.to_owned()), n.to_owned()))
+        .unwrap_or((None, name));
+
     let migrate_options = forgejo_api::structs::MigrateRepoOptions {
         auth_password: password,
         auth_username: username,
@@ -1105,7 +1553,7 @@ async fn migrate_repo(
         pull_requests: Some(include.prs),
         releases: Some(include.releases),
         repo_name: name,
-        repo_owner: None,
+        repo_owner: owner,
         service: Some(service.to_api_type()),
         uid: None,
         wiki: Some(include.wiki),
@@ -1116,7 +1564,7 @@ async fn migrate_repo(
     let new_repo_url = new_repo
         .html_url
         .as_ref()
-        .ok_or_eyre("new repo doesnt have url")?;
+        .ok_or_eyre("new repo doesn't have url")?;
     crate::output::success(&format!("Done! View online at {new_repo_url}"));
 
     Ok(())
@@ -1158,6 +1606,8 @@ async fn view_repo(api: &Forgejo, repo: &RepoName) -> eyre::Result<()> {
             }
         }
         println!();
+
+        archived_warning(&repo)?;
 
         let lang = repo.language.as_deref().unwrap_or_default();
         if !lang.is_empty() {
@@ -1234,31 +1684,63 @@ async fn view_repo(api: &Forgejo, repo: &RepoName) -> eyre::Result<()> {
     })
 }
 
-async fn view_repo_readme(api: &Forgejo, repo: &RepoName) -> eyre::Result<()> {
-    #[allow(clippy::type_complexity)]
-    let candidates: &[(&str, fn(&str) -> String)] = &[
-        ("README.md", crate::markdown),
-        ("readme.md", crate::markdown),
-        ("Readme.md", crate::markdown),
-        ("README", crate::markdown),
-        ("readme", crate::markdown),
-        ("README.txt", crate::render_text),
-        ("readme.txt", crate::render_text),
-        ("Readme.txt", crate::render_text),
-    ];
-
-    for &(filename, render) in candidates {
-        if let Ok(content) = api
-            .repo_get_raw_file(repo.owner(), repo.name(), filename, Default::default())
-            .await
-        {
-            let text = String::from_utf8_lossy(&content);
-            println!("{}", render(&text));
-            return Ok(());
-        }
+pub fn archived_warning(repo: &forgejo_api::structs::Repository) -> eyre::Result<()> {
+    let SpecialRender {
+        bright_yellow,
+        reset,
+        ..
+    } = crate::special_render();
+    if repo.archived.unwrap_or_default() {
+        let date_format = time::macros::format_description!("[month repr:long] [day], [year]");
+        let archived_at = repo
+            .archived_at
+            .as_ref()
+            .ok_or_eyre("archived_on not present")?;
+        println!(
+            "{bright_yellow}Repo archived since {}",
+            archived_at.format(&date_format)?
+        );
+        println!("You may view this repo, but interactions are disabled{reset}");
+        println!();
     }
+    Ok(())
+}
 
-    eyre::bail!("Repo does not have a README file");
+async fn view_repo_readme(api: &Forgejo, repo: &RepoName) -> eyre::Result<()> {
+    let query = forgejo_api::structs::RepoGetContentsListQuery::default();
+    let files = api
+        .repo_get_contents_list(repo.owner(), repo.name(), query)
+        .await?;
+
+    let readme = files
+        .iter()
+        .filter(|file| file.r#type.as_deref().is_some_and(|t| t == "file"))
+        .filter_map(|file| {
+            file.name.as_deref().filter(|name| {
+                name.split_once(".")
+                    .map(|(s, _)| s)
+                    .unwrap_or(name)
+                    .eq_ignore_ascii_case("readme")
+            })
+        })
+        .next()
+        .ok_or_eyre("Repo does not have a README")?;
+    let is_md = readme
+        .rsplit_once(".")
+        .is_some_and(|(_, s)| s.eq_ignore_ascii_case("md"));
+
+    let query = forgejo_api::structs::RepoGetRawFileQuery::default();
+    let body = api
+        .repo_get_raw_file(repo.owner(), repo.name(), readme, query)
+        .await?;
+    let body = String::from_utf8_lossy(body.as_ref());
+
+    if is_md {
+        println!("{}", crate::markdown(&body));
+    } else {
+        println!("{}", crate::render_text(&body));
+    }
+    Ok(())
 }
 
 async fn cmd_clone_repo(
@@ -1383,9 +1865,7 @@ pub fn load_ssh_keys(
     mut auth: auth_git2::GitAuthenticator,
     host: &str,
 ) -> auth_git2::GitAuthenticator {
-    if let Ok(ssh_config) =
-        ssh2_config::SshConfig::parse_default_file(ParseRule::ALLOW_UNKNOWN_FIELDS)
-    {
+    if let Some(ssh_config) = crate::get_ssh_config() {
         let params = ssh_config.query(host);
         if let Some(identity_file) = params.identity_file.as_deref() {
             for path in identity_file {
