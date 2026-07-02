@@ -16,8 +16,10 @@ Binary name is `fj` (set in Cargo.toml `[[bin]]`).
 ## Gotchas
 
 - **`SpecialRender` is a global singleton** -- access via `crate::special_render()`. Never construct raw ANSI codes.
-- **`--repo` flag is inconsistent** across commands. `search`, `create`, `milestone` have `--repo`; `view`, `edit` only have `--remote` (local git remote name). Pre-existing upstream issue.
-- **Cargo.toml `repository` and flake.nix `homepage`** still point to upstream.
+- **New subcommands should take `--repo`/`-r`** (`repo: Option<RepoArg>`) like the existing ones; the historical `--repo` inconsistency was fixed in #47 and later syncs.
+- **forgejo-api 0.11 requires Forgejo v16+** for `org` and `user key` commands: `Organization.created` and `PublicKey.updated_at` are presence-required fields that older servers omit.
+- **`main` runs the runtime on a 16 MiB thread** (`async_main`): debug-build futures embedding forgejo-api structs overflow the default 1 MiB Windows main-thread stack. Don't move `#[tokio::main]` back onto `main`.
+- **`keys.save()` is per-mutation**, not on exit -- every code path that mutates `KeyInfo` must call `keys.save().await?` itself.
 
 ## Adding a new command
 
