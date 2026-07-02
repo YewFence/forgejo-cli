@@ -63,7 +63,25 @@ impl TestInstance {
     pub async fn mock_repo(&self, owner: &str, name: &str) {
         Mock::given(method("GET"))
             .and(path(format!("/api/v1/repos/{owner}/{name}")))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            .respond_with(ResponseTemplate::new(200).set_body_json(Self::repo_json(owner, name)))
+            .mount(&self.server)
+            .await;
+    }
+
+    /// Same as `mock_repo`, but the repo is archived (for archived-warning tests).
+    pub async fn mock_repo_archived(&self, owner: &str, name: &str, archived_at: &str) {
+        let mut json = Self::repo_json(owner, name);
+        json["archived"] = serde_json::json!(true);
+        json["archived_at"] = serde_json::json!(archived_at);
+        Mock::given(method("GET"))
+            .and(path(format!("/api/v1/repos/{owner}/{name}")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json))
+            .mount(&self.server)
+            .await;
+    }
+
+    fn repo_json(owner: &str, name: &str) -> serde_json::Value {
+        serde_json::json!({
                 "id": 1,
                 "owner": {
                     "login": owner,
@@ -102,9 +120,7 @@ impl TestInstance {
                 "has_releases": true,
                 "created_at": "2024-01-01T00:00:00Z",
                 "updated_at": "2024-01-01T00:00:00Z"
-            })))
-            .mount(&self.server)
-            .await;
+        })
     }
 
     /// Mount a mock for GET /api/v1/repos/:owner/:repo/issues

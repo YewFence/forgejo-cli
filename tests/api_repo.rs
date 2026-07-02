@@ -81,6 +81,54 @@ async fn repo_view_json() {
 }
 
 #[tokio::test]
+async fn repo_view_archived_warning() {
+    let instance = common::TestInstance::start().await;
+
+    let mut repo = mock_repo_json("alice", "my-repo");
+    repo["archived"] = serde_json::json!(true);
+    repo["archived_at"] = serde_json::json!("2024-01-15T12:00:00Z");
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/alice/my-repo"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(repo))
+        .mount(&instance.server)
+        .await;
+
+    instance
+        .fj()
+        .args(["repo", "view", "alice/my-repo"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Repo archived since January 15, 2024",
+        ))
+        .stdout(predicate::str::contains("interactions are disabled"));
+}
+
+#[tokio::test]
+async fn repo_view_json_omits_archived_warning() {
+    let instance = common::TestInstance::start().await;
+
+    let mut repo = mock_repo_json("alice", "my-repo");
+    repo["archived"] = serde_json::json!(true);
+    repo["archived_at"] = serde_json::json!("2024-01-15T12:00:00Z");
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/alice/my-repo"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(repo))
+        .mount(&instance.server)
+        .await;
+
+    instance
+        .fj()
+        .args(["--json", "repo", "view", "alice/my-repo"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"archived\": true"))
+        .stdout(predicate::str::contains("interactions are disabled").not());
+}
+
+#[tokio::test]
 async fn repo_delete_dry_run() {
     let instance = common::TestInstance::start().await;
 

@@ -568,6 +568,14 @@ pub async fn view_issue(repo: &RepoName, api: &Forgejo, id: i64) -> eyre::Result
         return Ok(());
     }
 
+    // Only fetched for the human-readable archived-repo warning; --json output
+    // must not make the extra API call.
+    let repo_info = if crate::json_mode() {
+        None
+    } else {
+        Some(api.repo_get(repo.owner(), repo.name()).await?)
+    };
+
     crate::output::print_or_json(&issue, || {
         let crate::SpecialRender {
             dash,
@@ -633,6 +641,10 @@ pub async fn view_issue(repo: &RepoName, api: &Forgejo, id: i64) -> eyre::Result
             }
         }
         println!();
+
+        if let Some(repo_info) = &repo_info {
+            crate::repo::archived_warning(repo_info)?;
+        }
 
         if comments == 1 {
             println!("1 comment");

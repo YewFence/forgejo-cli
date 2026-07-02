@@ -567,6 +567,16 @@ pub async fn view_pr(repo: &RepoName, api: &Forgejo, id: Option<i64>) -> eyre::R
     let pr = try_get_pr(repo, api, id).await?;
     let id = pr.number.ok_or_eyre("pr does not have number")?;
 
+    // Only fetched for the human-readable archived-repo warning; --json output
+    // must not make the extra API call. Uses the PR's base repo, which is where
+    // interactions are disabled.
+    let repo_info = if crate::json_mode() {
+        None
+    } else {
+        let base_repo = repo_name_from_pr(&pr)?;
+        Some(api.repo_get(base_repo.owner(), base_repo.name()).await?)
+    };
+
     crate::output::print_or_json(&pr, || {
         let crate::SpecialRender {
             dash,
@@ -679,6 +689,11 @@ pub async fn view_pr(repo: &RepoName, api: &Forgejo, id: Option<i64>) -> eyre::R
             }
         }
         println!();
+
+        if let Some(repo_info) = &repo_info {
+            crate::repo::archived_warning(repo_info)?;
+        }
+
         if comments == 1 {
             println!("1 comment");
         } else {

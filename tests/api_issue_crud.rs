@@ -137,6 +137,14 @@ async fn issue_view_json() {
         .mount(&instance.server)
         .await;
 
+    // --json must not fetch the repo for the archived warning.
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/alice/repo"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(0)
+        .mount(&instance.server)
+        .await;
+
     instance
         .fj()
         .args(["--json", "issue", "view", "alice/repo#1"])
@@ -144,6 +152,30 @@ async fn issue_view_json() {
         .success()
         .stdout(predicate::str::contains("\"title\": \"Bug report\""))
         .stdout(predicate::str::contains("\"number\": 1"));
+}
+
+#[tokio::test]
+async fn issue_view_archived_warning() {
+    let instance = common::TestInstance::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/alice/repo/issues/1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(mock_issue_obj()))
+        .mount(&instance.server)
+        .await;
+    instance
+        .mock_repo_archived("alice", "repo", "2024-01-15T12:00:00Z")
+        .await;
+
+    instance
+        .fj()
+        .args(["issue", "view", "alice/repo#1"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Repo archived since January 15, 2024",
+        ))
+        .stdout(predicate::str::contains("interactions are disabled"));
 }
 
 // ===========================================================================
