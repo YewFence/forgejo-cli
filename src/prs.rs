@@ -45,6 +45,12 @@ pub enum PrSubcommand {
         /// Filter by milestone name
         #[clap(long, short = 'M')]
         milestone: Option<String>,
+        /// Filter by base branch name (server-side, via the pulls endpoint)
+        #[clap(long)]
+        base: Option<String>,
+        /// Filter by head branch name (server-side, via the pulls endpoint)
+        #[clap(long)]
+        head: Option<String>,
         /// The repo to search in
         #[clap(long, short)]
         repo: Option<RepoArg>,
@@ -480,10 +486,12 @@ impl PrCommand {
                 assignee,
                 state,
                 milestone,
+                base,
+                head,
                 repo: _,
             } => {
                 view_prs(
-                    repo, &api, query, labels, creator, assignee, state, milestone,
+                    repo, &api, query, labels, creator, assignee, state, milestone, base, head,
                 )
                 .await?
             }
@@ -1812,6 +1820,49 @@ async fn checkout_pr(
     Ok(())
 }
 
+const PR_LIST_HEADERS: &[&str] = &["ID", "STATE", "TITLE", "LABELS", "ASSIGNEE", "AGE"];
+
+/// Client-side query filtering: the Forgejo API `q` parameter is unreliable
+/// on some instances (especially large repos), and the pulls endpoint has no
+/// `q` parameter at all, so we filter results locally to ensure only matching
+/// PRs are shown. `q_lower` must already be lowercased.
+fn matches_query(title: Option<&str>, body: Option<&str>, q_lower: &str) -> bool {
+    title.unwrap_or("").to_lowercase().contains(q_lower)
+        || body.unwrap_or("").to_lowercase().contains(q_lower)
+}
+
+/// Build a `pr search` table row. Shared between the issues-endpoint path
+/// (`Issue`) and the pulls-endpoint path (`PullRequest`), which have
+/// identically-typed fields but are distinct structs.
+fn pr_list_row(
+    number: Option<i64>,
+    state: Option<&StateType>,
+    title: Option<&str>,
+    labels: Option<&[forgejo_api::structs::Label]>,
+    assignee: Option<&forgejo_api::structs::User>,
+    created_at: Option<&time::OffsetDateTime>,
+) -> Vec<String> {
+    let number = number.map(|n| format!("#{n}")).unwrap_or_default();
+    let state = state.map(crate::output::colored_state).unwrap_or_default();
+    let title = title.unwrap_or("").to_string();
+    let labels = labels
+        .map(|ls| {
+            ls.iter()
+                .filter_map(|l| l.name.as_deref())
+                .collect::<Vec<_>>()
+                .join(",")
+        })
+        .unwrap_or_default();
+    let assignee = assignee
+        .and_then(|u| u.login.as_deref())
+        .map(|u| format!("@{u}"))
+        .unwrap_or_default();
+    let age = created_at
+        .map(crate::output::relative_time)
+        .unwrap_or_default();
+    vec![number, state, title, labels, assignee, age]
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn view_prs(
     repo: &RepoName,
@@ -1822,10 +1873,83 @@ async fn view_prs(
     assignee: Option<String>,
     state: Option<crate::issues::State>,
     milestone: Option<String>,
+    base: Option<String>,
+    head: Option<String>,
 ) -> eyre::Result<()> {
     let labels = labels
         .map(|s| s.split(',').map(|s| s.to_string()).collect::<Vec<_>>())
         .unwrap_or_default();
+
+    // Base/head filtering is only available on the pulls endpoint, so switch
+    // to it when either flag is given. The default path stays on the issues
+    // endpoint, which supports free-text `q` and assignee filtering.
+    if base.is_some() || head.is_some() {
+        eyre::ensure!(
+            assignee.is_none(),
+            "--assignee cannot be combined with --base/--head; \
+            the pulls endpoint does not support filtering by assignee"
+        );
+        let label_ids = if labels.is_empty() {
+            None
+        } else {
+            Some(crate::issues::label_names_to_ids(repo, api, labels).await?)
+        };
+        let milestone_id = match &milestone {
+            Some(ms) => Some(
+                crate::milestone::find_milestone(api, repo, ms)
+                    .await?
+                    .id
+                    .ok_or_eyre("milestone does not have id")?,
+            ),
+            None => None,
+        };
+        let query = forgejo_api::structs::RepoListPullRequestsQuery {
+            state: state.map(|s| {
+                use forgejo_api::structs::RepoListPullRequestsQueryState as QueryState;
+                match s {
+                    crate::issues::State::Open => QueryState::Open,
+                    crate::issues::State::Closed => QueryState::Closed,
+                    crate::issues::State::All => QueryState::All,
+                }
+            }),
+            sort: None,
+            milestone: milestone_id,
+            labels: label_ids,
+            poster: creator,
+            base,
+            head,
+        };
+        crate::verbose_log!(
+            "Listing pull requests for {}/{} via the pulls endpoint",
+            repo.owner(),
+            repo.name()
+        );
+        let prs = api
+            .repo_list_pull_requests(repo.owner(), repo.name(), query)
+            .all()
+            .await?;
+        let prs: Vec<_> = match &query_str {
+            Some(q) => {
+                let q_lower = q.to_lowercase();
+                prs.into_iter()
+                    .filter(|pr| matches_query(pr.title.as_deref(), pr.body.as_deref(), &q_lower))
+                    .collect()
+            }
+            None => prs,
+        };
+        crate::output::print_list(&prs, PR_LIST_HEADERS, |pr| {
+            pr_list_row(
+                pr.number,
+                pr.state.as_ref(),
+                pr.title.as_deref(),
+                pr.labels.as_deref(),
+                pr.assignee.as_ref(),
+                pr.created_at.as_ref(),
+            )
+        });
+        return Ok(());
+    }
+
     let query = forgejo_api::structs::IssueListIssuesQuery {
         q: query_str.clone(),
         labels: Some(labels.join(",")),
@@ -1843,64 +1967,25 @@ async fn view_prs(
         .issue_list_issues(repo.owner(), repo.name(), query)
         .all()
         .await?;
-    // Client-side filtering: the Forgejo API `q` parameter is unreliable on
-    // some instances (especially large repos), so we filter results locally
-    // to ensure only matching PRs are shown.
-    let prs: Vec<_> = if let Some(ref q) = query_str {
-        let q_lower = q.to_lowercase();
-        prs.into_iter()
-            .filter(|pr| {
-                pr.title
-                    .as_deref()
-                    .unwrap_or("")
-                    .to_lowercase()
-                    .contains(&q_lower)
-                    || pr
-                        .body
-                        .as_deref()
-                        .unwrap_or("")
-                        .to_lowercase()
-                        .contains(&q_lower)
-            })
-            .collect()
-    } else {
-        prs
+    let prs: Vec<_> = match &query_str {
+        Some(q) => {
+            let q_lower = q.to_lowercase();
+            prs.into_iter()
+                .filter(|pr| matches_query(pr.title.as_deref(), pr.body.as_deref(), &q_lower))
+                .collect()
+        }
+        None => prs,
     };
-    crate::output::print_list(
-        &prs,
-        &["ID", "STATE", "TITLE", "LABELS", "ASSIGNEE", "AGE"],
-        |pr| {
-            let number = pr.number.map(|n| format!("#{n}")).unwrap_or_default();
-            let state = pr
-                .state
-                .as_ref()
-                .map(crate::output::colored_state)
-                .unwrap_or_default();
-            let title = pr.title.as_deref().unwrap_or("").to_string();
-            let labels = pr
-                .labels
-                .as_ref()
-                .map(|ls| {
-                    ls.iter()
-                        .filter_map(|l| l.name.as_deref())
-                        .collect::<Vec<_>>()
-                        .join(",")
-                })
-                .unwrap_or_default();
-            let assignee = pr
-                .assignee
-                .as_ref()
-                .and_then(|u| u.login.as_deref())
-                .map(|u| format!("@{u}"))
-                .unwrap_or_default();
-            let age = pr
-                .created_at
-                .as_ref()
-                .map(crate::output::relative_time)
-                .unwrap_or_default();
-            vec![number, state, title, labels, assignee, age]
-        },
-    );
+    crate::output::print_list(&prs, PR_LIST_HEADERS, |pr| {
+        pr_list_row(
+            pr.number,
+            pr.state.as_ref(),
+            pr.title.as_deref(),
+            pr.labels.as_deref(),
+            pr.assignee.as_ref(),
+            pr.created_at.as_ref(),
+        )
+    });
     Ok(())
 }
 

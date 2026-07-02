@@ -1,7 +1,7 @@
 mod common;
 
 use predicates::prelude::*;
-use wiremock::matchers::{body_partial_json, method, path, path_regex};
+use wiremock::matchers::{body_partial_json, method, path, path_regex, query_param};
 use wiremock::{Mock, ResponseTemplate};
 
 // ---------------------------------------------------------------------------
@@ -837,6 +837,76 @@ async fn pr_comment() {
         .assert()
         .success()
         .stderr(predicate::str::contains("Added comment on issue #1"));
+}
+
+/// `pr search --base` switches to the pulls endpoint with server-side
+/// base branch filtering; the issues endpoint must not be called.
+#[tokio::test]
+async fn pr_search_base_uses_pulls_endpoint() {
+    let instance = common::TestInstance::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/alice/repo/pulls"))
+        .and(query_param("base", "main"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!([mock_pr_obj()]))
+                .insert_header("x-total-count", "1"),
+        )
+        .expect(1)
+        .mount(&instance.server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/alice/repo/issues"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+        .expect(0)
+        .mount(&instance.server)
+        .await;
+
+    instance
+        .fj()
+        .args([
+            "--json", "pr", "search", "--repo", "alice/repo", "--base", "main",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"title\": \"Test PR\""));
+}
+
+/// `pr search --head` switches to the pulls endpoint with server-side
+/// head branch filtering; the issues endpoint must not be called.
+#[tokio::test]
+async fn pr_search_head_uses_pulls_endpoint() {
+    let instance = common::TestInstance::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/alice/repo/pulls"))
+        .and(query_param("head", "feature"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!([mock_pr_obj()]))
+                .insert_header("x-total-count", "1"),
+        )
+        .expect(1)
+        .mount(&instance.server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/alice/repo/issues"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+        .expect(0)
+        .mount(&instance.server)
+        .await;
+
+    instance
+        .fj()
+        .args([
+            "--json", "pr", "search", "--repo", "alice/repo", "--head", "feature",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"title\": \"Test PR\""));
 }
 
 /// Verify that client-side filtering removes PRs not matching the query,
