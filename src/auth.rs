@@ -111,8 +111,8 @@ impl AuthCommand {
                 if keys.hosts.is_empty() {
                     crate::output::info("No logins.");
                 }
-                for (host_url, _) in &keys.hosts {
-                    println!("{}", host_url);
+                for host_url in keys.hosts.keys() {
+                    println!("{host_url}");
                 }
             }
         }
