@@ -325,7 +325,17 @@ fn ssh_url_parse_with(
             if let Some(host_name) = host_params.host_name {
                 // Expand '%h' and '%%' per ssh_config(5)
                 let expanded = host_name.replace("%h", &host_str).replace("%%", "%");
-                url.set_host(Some(&expanded))?;
+                // An IP-literal HostName redirects the ssh transport (common
+                // with gateways like Cloudron); the domain in the remote is
+                // still the forge's identity for API URLs and saved logins.
+                let is_ip_literal = expanded
+                    .trim_start_matches('[')
+                    .trim_end_matches(']')
+                    .parse::<std::net::IpAddr>()
+                    .is_ok();
+                if !is_ip_literal {
+                    url.set_host(Some(&expanded))?;
+                }
             }
         }
     }
@@ -1251,6 +1261,20 @@ mod tests {
         let config = test_ssh_config("Host cb\n  HostName %h.internal\n");
         let url = ssh_url_parse_with("git@cb:owner/repo", Some(&config)).unwrap();
         assert_eq!(url.host_str(), Some("cb.internal"));
+    }
+
+    #[test]
+    fn ssh_url_parse_keeps_host_when_hostname_is_ipv4() {
+        let config = test_ssh_config("Host git.example.com\n  HostName 178.156.199.96\n");
+        let url = ssh_url_parse_with("git@git.example.com:owner/repo", Some(&config)).unwrap();
+        assert_eq!(url.host_str(), Some("git.example.com"));
+    }
+
+    #[test]
+    fn ssh_url_parse_keeps_host_when_hostname_is_ipv6() {
+        let config = test_ssh_config("Host git.example.com\n  HostName 2001:db8::1\n");
+        let url = ssh_url_parse_with("git@git.example.com:owner/repo", Some(&config)).unwrap();
+        assert_eq!(url.host_str(), Some("git.example.com"));
     }
 
     #[test]
