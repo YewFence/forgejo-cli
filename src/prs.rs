@@ -216,6 +216,9 @@ pub enum PrSubcommand {
     Review {
         /// The pull request to view.
         id: Option<IssueId>,
+        /// The repo to operate on (alternative to owner/repo#id syntax)
+        #[clap(long, short = 'r')]
+        repo: Option<RepoArg>,
         #[clap(subcommand)]
         command: Option<ReviewCommand>,
     },
@@ -529,7 +532,11 @@ impl PrCommand {
                 let (repo, pr) = try_get_pr_number(repo, &api, pr.map(|pr| pr.number)).await?;
                 crate::issues::add_comment(&repo, &api, pr, body, body_file).await?
             }
-            Review { id, command } => {
+            Review {
+                id,
+                command,
+                repo: _,
+            } => {
                 let id = id.map(|id| id.number);
                 match command.unwrap_or(ReviewCommand::List {
                     comments: false,
@@ -556,10 +563,10 @@ impl PrCommand {
             | Close { repo, pr, .. }
             | Reopen { repo, pr, .. }
             | Merge { repo, pr, .. }
-            | Browse { repo, id: pr, .. } => {
+            | Browse { repo, id: pr, .. }
+            | Review { repo, id: pr, .. } => {
                 repo.as_ref().or(pr.as_ref().and_then(|x| x.repo.as_ref()))
             }
-            Review { id: pr, .. } => pr.as_ref().and_then(|x| x.repo.as_ref()),
         }
     }
 

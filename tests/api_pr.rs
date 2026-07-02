@@ -282,6 +282,189 @@ async fn pr_view_archived_warning() {
 }
 
 // ===========================================================================
+// 2b. PR reviews
+// ===========================================================================
+
+fn mock_review_obj(
+    id: i64,
+    reviewer: &str,
+    state: &str,
+    stale: bool,
+    comments_count: i64,
+) -> serde_json::Value {
+    serde_json::json!({
+        "id": id,
+        "user": {
+            "id": 2,
+            "login": reviewer,
+            "full_name": reviewer,
+            "email": format!("{reviewer}@example.com"),
+            "avatar_url": "",
+            "html_url": format!("https://example.com/{reviewer}"),
+            "created": "2024-01-01T00:00:00Z",
+            "last_login": "2024-01-01T00:00:00Z"
+        },
+        "team": null,
+        "state": state,
+        "body": "Review body",
+        "commit_id": "abc123",
+        "stale": stale,
+        "official": true,
+        "dismissed": false,
+        "comments_count": comments_count,
+        "submitted_at": "2024-01-15T10:00:00Z",
+        "updated_at": "2024-01-15T10:00:00Z",
+        "html_url": "https://example.com/alice/repo/pulls/1#issuecomment-1",
+        "pull_request_url": "https://example.com/alice/repo/pulls/1"
+    })
+}
+
+async fn mount_pr_reviews(instance: &common::TestInstance, reviews: serde_json::Value) {
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/alice/repo/pulls/1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(mock_pr_obj()))
+        .mount(&instance.server)
+        .await;
+
+    let count = reviews.as_array().map(|a| a.len()).unwrap_or_default();
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/alice/repo/pulls/1/reviews"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(reviews)
+                .insert_header("x-total-count", count.to_string().as_str()),
+        )
+        .expect(1)
+        .mount(&instance.server)
+        .await;
+}
+
+#[tokio::test]
+async fn pr_review_list() {
+    let instance = common::TestInstance::start().await;
+    mount_pr_reviews(
+        &instance,
+        serde_json::json!([
+            mock_review_obj(5, "bob", "APPROVED", false, 0),
+            mock_review_obj(6, "carol", "REQUEST_CHANGES", true, 0),
+        ]),
+    )
+    .await;
+
+    // The stale review from carol is hidden by default.
+    instance
+        .fj()
+        .args(["pr", "review", "alice/repo#1", "list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("APPROVED by bob"))
+        .stdout(predicate::str::contains("carol").not());
+}
+
+#[tokio::test]
+async fn pr_review_list_all_includes_stale() {
+    let instance = common::TestInstance::start().await;
+    mount_pr_reviews(
+        &instance,
+        serde_json::json!([mock_review_obj(6, "carol", "REQUEST_CHANGES", true, 0)]),
+    )
+    .await;
+
+    instance
+        .fj()
+        .args(["pr", "review", "alice/repo#1", "list", "--all"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("CHANGES REQUESTED by carol"))
+        .stdout(predicate::str::contains("(stale)"));
+}
+
+#[tokio::test]
+async fn pr_review_list_only_stale_hint() {
+    let instance = common::TestInstance::start().await;
+    mount_pr_reviews(
+        &instance,
+        serde_json::json!([mock_review_obj(6, "carol", "REQUEST_CHANGES", true, 0)]),
+    )
+    .await;
+
+    instance
+        .fj()
+        .args(["pr", "review", "alice/repo#1", "list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Only stale or dismissed reviews, use -a to display them.",
+        ));
+}
+
+#[tokio::test]
+async fn pr_review_list_empty() {
+    let instance = common::TestInstance::start().await;
+    mount_pr_reviews(&instance, serde_json::json!([])).await;
+
+    instance
+        .fj()
+        .args(["pr", "review", "alice/repo#1", "list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("No reviews."));
+}
+
+#[tokio::test]
+async fn pr_review_list_with_comments() {
+    let instance = common::TestInstance::start().await;
+    mount_pr_reviews(
+        &instance,
+        serde_json::json!([mock_review_obj(5, "bob", "APPROVED", false, 1)]),
+    )
+    .await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/alice/repo/pulls/1/reviews/5/comments"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            {
+                "id": 9,
+                "body": "Please rename this variable",
+                "path": "src/main.rs",
+                "position": 3,
+                "original_position": 3,
+                "diff_hunk": "@@ -1,3 +1,3 @@",
+                "commit_id": "abc123",
+                "original_commit_id": "abc123",
+                "pull_request_review_id": 5,
+                "user": {
+                    "id": 2,
+                    "login": "bob",
+                    "full_name": "Bob",
+                    "email": "bob@example.com",
+                    "avatar_url": "",
+                    "html_url": "https://example.com/bob",
+                    "created": "2024-01-01T00:00:00Z",
+                    "last_login": "2024-01-01T00:00:00Z"
+                },
+                "resolver": null,
+                "created_at": "2024-01-15T10:00:00Z",
+                "updated_at": "2024-01-15T10:00:00Z",
+                "html_url": "https://example.com/alice/repo/pulls/1#discussion-9",
+                "pull_request_url": "https://example.com/alice/repo/pulls/1"
+            }
+        ])))
+        .expect(1)
+        .mount(&instance.server)
+        .await;
+
+    instance
+        .fj()
+        .args(["pr", "review", "alice/repo#1", "list", "--comments"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("In src/main.rs:3"))
+        .stdout(predicate::str::contains("bob commented"))
+        .stdout(predicate::str::contains("Please rename this variable"));
+}
+
+// ===========================================================================
 // 3. PR create
 // ===========================================================================
 
