@@ -65,6 +65,10 @@ fj issue edit 42 body "New body"
 fj issue edit 42 labels -a bug -a urgent -r wontfix
 fj issue edit 42 assignees -a user1 -r user2
 
+# Assignees (shorthand for edit assignees)
+fj --yes issue assign 42 user1 user2
+fj --yes issue unassign 42 user1
+
 # State
 fj --yes issue close 42
 fj --yes issue close 42 -w "Fixed in abc123"
@@ -92,6 +96,8 @@ fj pr create --base main --head feature -r owner/repo
 # Search/list
 fj --json pr search -r owner/repo -s open
 fj --json pr search -r owner/repo -l "needs-review"
+fj --json pr search -r owner/repo --base main    # Server-side branch filters
+fj --json pr search -r owner/repo --head feature
 
 # View
 fj --json pr view 10
@@ -105,6 +111,15 @@ fj pr view 10 comment 3                     # Specific comment
 # CI Status
 fj --json pr status 10
 fj pr status 10 --wait                      # Block until CI finishes
+
+# Reviews (flags go before `list`)
+fj --json pr review 10 list
+fj pr review 10 list -c                     # Include inline code comments
+fj pr review 10 list -a                     # Include stale/dismissed reviews
+
+# Assignees (PR via -p flag; defaults to current branch's PR)
+fj --yes pr assign -p 10 user1 user2
+fj --yes pr unassign -p 10 user1
 
 # Edit
 fj pr edit 10 title "New title"
@@ -152,6 +167,16 @@ fj repo clone owner/repo -S                  # Clone via SSH
 fj --yes repo star
 fj --yes repo unstar
 fj --yes repo delete owner/repo --force      # Destructive
+
+# Edit properties
+fj --yes repo edit -d "New description" -r owner/repo
+fj --yes repo edit --archived true -r owner/repo   # Archive/unarchive
+fj --yes repo edit -p true -r owner/repo           # Set private
+
+# Units (flags go before the unit name; no flags = show status)
+fj repo units -r owner/repo issues                 # Report enabled/disabled
+fj --yes repo units -r owner/repo wiki -e false    # Disable a unit
+fj --yes repo units -r owner/repo actions -e true
 
 # Labels (nested under `repo labels`, NOT top-level)
 fj --json repo labels list
@@ -284,8 +309,23 @@ fj --yes user gpg delete 42 --force
 
 ```bash
 fj --json actions tasks                      # List workflow runs
+fj --json actions tasks --status failure     # Filter by status
 fj actions dispatch workflow.yml main        # Trigger workflow
 fj actions dispatch deploy.yml main -I env=prod -I version=1.0
+
+# Runs
+fj --json actions run list
+fj --json actions run view 42
+fj actions run jobs 42                       # Jobs in a run
+fj actions run logs 42 > logs.zip            # All job logs (ZIP to stdout)
+fj actions run logs 42 --job 3               # One job's logs as plaintext
+fj --yes actions run cancel 42
+fj --yes actions run delete 42 --force
+
+# Artifacts
+fj --json actions artifact list
+fj actions artifact download build-output -o ./out
+fj --yes actions artifact delete build-output --force
 
 # Variables
 fj --json actions variables list
