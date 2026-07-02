@@ -216,4 +216,15 @@ mod tests {
         let result = keys.deref_alias(url.clone());
         assert_eq!(result, url);
     }
+
+    #[tokio::test]
+    async fn refresh_is_noop_for_application_logins() {
+        let mut login = LoginInfo::Application {
+            name: "alice".into(),
+            token: "token123".into(),
+        };
+        let url = Url::parse("https://git.example.com/").unwrap();
+        let was_refreshed = login.refresh(&url).await.unwrap();
+        assert!(!was_refreshed);
+    }
 }
