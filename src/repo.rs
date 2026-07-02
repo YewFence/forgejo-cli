@@ -1694,7 +1694,7 @@ async fn view_repo_readme(api: &Forgejo, repo: &RepoName) -> eyre::Result<()> {
 
     let query = forgejo_api::structs::RepoGetRawFileQuery::default();
     let body = api
-        .repo_get_raw_file(repo.owner(), repo.name(), &readme, query)
+        .repo_get_raw_file(repo.owner(), repo.name(), readme, query)
         .await?;
     let body = String::from_utf8_lossy(body.as_ref());
 
