@@ -35,3 +35,14 @@ fn help_subcommand(#[case] cmd: &str) {
     let stdout = normalize_bin_name(&String::from_utf8_lossy(&output.stdout));
     insta::assert_snapshot!(format!("help_{cmd}"), stdout);
 }
+
+#[rstest]
+#[case("actions run")]
+#[case("actions artifact")]
+fn help_nested_subcommand(#[case] cmd: &str) {
+    let mut args: Vec<&str> = cmd.split(' ').collect();
+    args.push("--help");
+    let output = fj().args(&args).output().unwrap();
+    let stdout = normalize_bin_name(&String::from_utf8_lossy(&output.stdout));
+    insta::assert_snapshot!(format!("help_{}", cmd.replace(' ', "_")), stdout);
+}

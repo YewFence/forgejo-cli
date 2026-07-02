@@ -3,7 +3,12 @@ use std::collections::BTreeMap;
 use clap::{Args, Subcommand};
 use eyre::{bail, OptionExt};
 use forgejo_api::{
-    structs::{CreateOrUpdateSecretOption, CreateVariableOption, UpdateVariableOption},
+    structs::{
+        ActionArtifact, CreateOrUpdateSecretOption, CreateVariableOption,
+        ListActionArtifactsQuery, ListActionRunsQuery, ListActionRunsQueryStatus,
+        ListActionTasksQuery, ListActionTasksQueryStatus, RepoGetActionJobLogsQuery,
+        UpdateVariableOption,
+    },
     Forgejo, ForgejoError,
 };
 use hyper::StatusCode;
@@ -31,6 +36,24 @@ pub enum ActionsSubcommand {
         /// The page to show. One page always includes up to 20 tasks.
         #[clap(long, short, default_value = "1")]
         page: u32,
+
+        /// Only show tasks with this status. Can be given multiple times.
+        #[clap(long, value_enum)]
+        status: Vec<StatusFilter>,
+    },
+
+    /// List and manage workflow runs
+    #[clap(alias = "runs")]
+    Run {
+        #[clap(subcommand)]
+        command: ActionsRunSubcommand,
+    },
+
+    /// List and manage workflow run artifacts
+    #[clap(alias = "artifacts")]
+    Artifact {
+        #[clap(subcommand)]
+        command: ActionsArtifactSubcommand,
     },
 
     /// List and manage variables
@@ -117,6 +140,147 @@ pub enum ActionsSecretsSubcommmand {
     },
 }
 
+/// A task/run status filter, mapped onto the forgejo-api query enums.
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
+pub enum StatusFilter {
+    Unknown,
+    Waiting,
+    Running,
+    Success,
+    Failure,
+    Cancelled,
+    Skipped,
+    Blocked,
+}
+
+impl From<StatusFilter> for ListActionTasksQueryStatus {
+    fn from(status: StatusFilter) -> Self {
+        match status {
+            StatusFilter::Unknown => Self::Unknown,
+            StatusFilter::Waiting => Self::Waiting,
+            StatusFilter::Running => Self::Running,
+            StatusFilter::Success => Self::Success,
+            StatusFilter::Failure => Self::Failure,
+            StatusFilter::Cancelled => Self::Cancelled,
+            StatusFilter::Skipped => Self::Skipped,
+            StatusFilter::Blocked => Self::Blocked,
+        }
+    }
+}
+
+impl From<StatusFilter> for ListActionRunsQueryStatus {
+    fn from(status: StatusFilter) -> Self {
+        match status {
+            StatusFilter::Unknown => Self::Unknown,
+            StatusFilter::Waiting => Self::Waiting,
+            StatusFilter::Running => Self::Running,
+            StatusFilter::Success => Self::Success,
+            StatusFilter::Failure => Self::Failure,
+            StatusFilter::Cancelled => Self::Cancelled,
+            StatusFilter::Skipped => Self::Skipped,
+            StatusFilter::Blocked => Self::Blocked,
+        }
+    }
+}
+
+#[derive(Subcommand, Clone, Debug)]
+pub enum ActionsRunSubcommand {
+    /// List workflow runs
+    List {
+        /// The page to show. One page always includes up to 20 runs.
+        #[clap(long, short, default_value = "1")]
+        page: u32,
+
+        /// Only show runs on this git reference, e.g. `refs/heads/main`
+        #[clap(long)]
+        r#ref: Option<String>,
+
+        /// Only show runs of this workflow file, e.g. `ci.yml`
+        #[clap(long)]
+        workflow_id: Option<String>,
+
+        /// Only show runs with this status. Can be given multiple times.
+        #[clap(long, value_enum)]
+        status: Vec<StatusFilter>,
+    },
+
+    /// View a workflow run
+    View {
+        /// The id of the run to view
+        id: i64,
+    },
+
+    /// List the jobs of a workflow run
+    Jobs {
+        /// The id of the run to list jobs for
+        id: i64,
+    },
+
+    /// Print the logs of a workflow run
+    ///
+    /// With `--job`, prints the plaintext logs of that job to stdout. Without
+    /// it, writes a ZIP archive containing the logs of every job in the run
+    /// to stdout.
+    Logs {
+        /// The id of the run to fetch logs for
+        id: i64,
+
+        /// Print the plaintext logs of this job (see `run jobs` for job ids)
+        #[clap(long, short)]
+        job: Option<i64>,
+    },
+
+    /// Cancel a pending or running workflow run
+    Cancel {
+        /// The id of the run to cancel
+        id: i64,
+    },
+
+    /// Delete a completed workflow run
+    Delete {
+        /// The id of the run to delete
+        id: i64,
+        /// Skip confirmation prompt
+        #[clap(long, short = 'f')]
+        force: bool,
+        /// Preview without executing
+        #[clap(long)]
+        dry_run: bool,
+    },
+}
+
+#[derive(Subcommand, Clone, Debug)]
+pub enum ActionsArtifactSubcommand {
+    /// List artifacts
+    List {
+        /// Only list artifacts of this workflow run
+        #[clap(long)]
+        run: Option<i64>,
+    },
+
+    /// Download an artifact's ZIP archive
+    Download {
+        /// The artifact to download, by id or name
+        artifact: String,
+
+        /// Where to save the artifact. Defaults to `<name>.zip`
+        #[clap(long, short)]
+        output: Option<std::path::PathBuf>,
+    },
+
+    /// Delete an artifact
+    Delete {
+        /// The artifact to delete, by id or name
+        artifact: String,
+        /// Skip confirmation prompt
+        #[clap(long, short = 'f')]
+        force: bool,
+        /// Preview without executing
+        #[clap(long)]
+        dry_run: bool,
+    },
+}
+
 impl ActionsCommand {
     pub async fn run(self, keys: &mut crate::KeyInfo, host_name: Option<&str>) -> eyre::Result<()> {
         let repo =
@@ -127,7 +291,39 @@ impl ActionsCommand {
             .name()
             .ok_or_eyre("can't figure what repo to access, try specifying with `--repo`")?;
         match self.command {
-            ActionsSubcommand::Tasks { page } => view_tasks(repo, &api, page).await?,
+            ActionsSubcommand::Tasks { page, status } => {
+                view_tasks(repo, &api, page, status).await?
+            }
+
+            ActionsSubcommand::Run { command } => match command {
+                ActionsRunSubcommand::List {
+                    page,
+                    r#ref,
+                    workflow_id,
+                    status,
+                } => list_runs(repo, &api, page, r#ref, workflow_id, status).await?,
+                ActionsRunSubcommand::View { id } => view_run(repo, &api, id).await?,
+                ActionsRunSubcommand::Jobs { id } => list_run_jobs(repo, &api, id).await?,
+                ActionsRunSubcommand::Logs { id, job } => run_logs(repo, &api, id, job).await?,
+                ActionsRunSubcommand::Cancel { id } => cancel_run(repo, &api, id).await?,
+                ActionsRunSubcommand::Delete { id, force, dry_run } => {
+                    delete_run(repo, &api, id, force, dry_run).await?
+                }
+            },
+
+            ActionsSubcommand::Artifact { command } => match command {
+                ActionsArtifactSubcommand::List { run } => {
+                    list_artifacts(repo, &api, run).await?
+                }
+                ActionsArtifactSubcommand::Download { artifact, output } => {
+                    download_artifact(repo, &api, artifact, output).await?
+                }
+                ActionsArtifactSubcommand::Delete {
+                    artifact,
+                    force,
+                    dry_run,
+                } => delete_artifact(repo, &api, artifact, force, dry_run).await?,
+            },
 
             ActionsSubcommand::Variables { command } => match command {
                 ActionsVariablesSubcommmand::List { verbose } => {
@@ -166,15 +362,24 @@ impl ActionsCommand {
     }
 }
 
-async fn view_tasks(repo: &RepoName, api: &Forgejo, page: u32) -> eyre::Result<()> {
+async fn view_tasks(
+    repo: &RepoName,
+    api: &Forgejo,
+    page: u32,
+    status: Vec<StatusFilter>,
+) -> eyre::Result<()> {
+    let query = ListActionTasksQuery {
+        status: if status.is_empty() {
+            None
+        } else {
+            Some(status.into_iter().map(Into::into).collect())
+        },
+    };
+
     // We don't iterate this to collect all tasks (not just the ones on the first page) like the
     // issue search subcommand will do, because it's unlikely someone wants to see *all* tasks.
     let res = api
-        .list_action_tasks(
-            repo.owner(),
-            repo.name(),
-            forgejo_api::structs::ListActionTasksQuery::default(),
-        )
+        .list_action_tasks(repo.owner(), repo.name(), query)
         .page(page)
         .page_size(20)
         .await?;
@@ -237,6 +442,399 @@ fn colored_task_status(status: Option<&str>) -> String {
         Some("blocked") => format!("{bright_red}blocked{reset}"),
         Some(x) => x.to_string(),
         None => "?".to_string(),
+    }
+}
+
+async fn list_runs(
+    repo: &RepoName,
+    api: &Forgejo,
+    page: u32,
+    r#ref: Option<String>,
+    workflow_id: Option<String>,
+    status: Vec<StatusFilter>,
+) -> eyre::Result<()> {
+    let query = ListActionRunsQuery {
+        event: None,
+        status: if status.is_empty() {
+            None
+        } else {
+            Some(status.into_iter().map(Into::into).collect())
+        },
+        run_number: None,
+        head_sha: None,
+        r#ref,
+        workflow_id,
+    };
+
+    crate::verbose_log!("Listing runs on {}/{}", repo.owner(), repo.name());
+    let res = api
+        .list_action_runs(repo.owner(), repo.name(), query)
+        .page(page)
+        .page_size(20)
+        .await?;
+
+    let runs = res.workflow_runs.unwrap_or_default();
+
+    crate::output::print_list(
+        &runs,
+        &["ID", "WORKFLOW", "STATUS", "REF", "STARTED"],
+        |run| {
+            vec![
+                run.id
+                    .map(|id| id.to_string())
+                    .unwrap_or_else(|| "?".to_string()),
+                run.workflow_id.as_deref().unwrap_or("?").to_string(),
+                colored_task_status(run.status.as_deref()),
+                run.prettyref.as_deref().unwrap_or("").to_string(),
+                run.started
+                    .as_ref()
+                    .map(crate::output::relative_time)
+                    .unwrap_or_default(),
+            ]
+        },
+    );
+
+    Ok(())
+}
+
+async fn view_run(repo: &RepoName, api: &Forgejo, id: i64) -> eyre::Result<()> {
+    crate::verbose_log!("Fetching run {id} on {}/{}", repo.owner(), repo.name());
+    let run = api.get_action_run(repo.owner(), repo.name(), id).await?;
+
+    crate::output::print_or_json(&run, || {
+        let crate::SpecialRender { bold, reset, .. } = *crate::special_render();
+
+        let title = run.title.as_deref().unwrap_or("(untitled)");
+        println!("{bold}{title}{reset}");
+        println!("workflow: {}", run.workflow_id.as_deref().unwrap_or("?"));
+        println!("status: {}", colored_task_status(run.status.as_deref()));
+        println!(
+            "trigger: {} by {}",
+            run.trigger_event
+                .as_deref()
+                .or(run.event.as_deref())
+                .unwrap_or("?"),
+            run.trigger_user
+                .as_ref()
+                .and_then(|user| user.login.as_deref())
+                .unwrap_or("?"),
+        );
+        println!("ref: {}", run.prettyref.as_deref().unwrap_or("?"));
+        if let Some(sha) = run.commit_sha.as_deref() {
+            let sha = if sha.len() > 10 { &sha[0..10] } else { sha };
+            println!("commit: {sha}");
+        }
+        if let Some(created) = run.created {
+            println!("created: {created}");
+        }
+        if let Some(started) = run.started {
+            println!("started: {started}");
+        }
+        if let Some(stopped) = run.stopped {
+            println!("stopped: {stopped}");
+        }
+        if let Some(url) = &run.html_url {
+            println!("url: {url}");
+        }
+        Ok(())
+    })?;
+
+    Ok(())
+}
+
+async fn list_run_jobs(repo: &RepoName, api: &Forgejo, id: i64) -> eyre::Result<()> {
+    crate::verbose_log!(
+        "Listing jobs of run {id} on {}/{}",
+        repo.owner(),
+        repo.name()
+    );
+    let jobs = api
+        .list_action_run_jobs(repo.owner(), repo.name(), id)
+        .await?;
+
+    crate::output::print_list(&jobs, &["ID", "NAME", "STATUS"], |job| {
+        vec![
+            job.id
+                .map(|id| id.to_string())
+                .unwrap_or_else(|| "?".to_string()),
+            job.name.as_deref().unwrap_or("?").to_string(),
+            colored_task_status(job.status.as_deref()),
+        ]
+    });
+
+    Ok(())
+}
+
+async fn run_logs(repo: &RepoName, api: &Forgejo, id: i64, job: Option<i64>) -> eyre::Result<()> {
+    match job {
+        Some(job_id) => {
+            crate::verbose_log!(
+                "Fetching logs of job {job_id} on {}/{}",
+                repo.owner(),
+                repo.name()
+            );
+            let logs = api
+                .repo_get_action_job_logs(
+                    repo.owner(),
+                    repo.name(),
+                    job_id,
+                    RepoGetActionJobLogsQuery::default(),
+                )
+                .await?;
+            print!("{logs}");
+        }
+        None => {
+            crate::verbose_log!(
+                "Fetching log archive of run {id} on {}/{}",
+                repo.owner(),
+                repo.name()
+            );
+            let archive = api
+                .repo_get_action_run_logs(repo.owner(), repo.name(), id)
+                .await?;
+            use std::io::Write;
+            std::io::stdout().write_all(&archive)?;
+        }
+    }
+
+    Ok(())
+}
+
+async fn cancel_run(repo: &RepoName, api: &Forgejo, id: i64) -> eyre::Result<()> {
+    crate::verbose_log!("Cancelling run {id} on {}/{}", repo.owner(), repo.name());
+    api.cancel_action_run(repo.owner(), repo.name(), id)
+        .await?;
+    crate::output::success(&format!("Cancelled run {id}"));
+
+    Ok(())
+}
+
+async fn delete_run(
+    repo: &RepoName,
+    api: &Forgejo,
+    id: i64,
+    force: bool,
+    dry_run: bool,
+) -> eyre::Result<()> {
+    if dry_run {
+        crate::output::dry_run(&format!(
+            "delete run {id} on {}/{}",
+            repo.owner(),
+            repo.name()
+        ));
+        return Ok(());
+    }
+
+    if !force
+        && !crate::yes_mode()
+        && !crate::prompt_bool(&format!("Delete run {id}?"), false).await?
+    {
+        crate::output::info("Not deleted");
+        return Ok(());
+    }
+
+    crate::verbose_log!("Deleting run {id} on {}/{}", repo.owner(), repo.name());
+    api.delete_action_run(repo.owner(), repo.name(), id)
+        .await?;
+    crate::output::success(&format!("Deleted run {id}"));
+
+    Ok(())
+}
+
+async fn list_artifacts(repo: &RepoName, api: &Forgejo, run: Option<i64>) -> eyre::Result<()> {
+    let artifacts = match run {
+        Some(run_id) => {
+            crate::verbose_log!(
+                "Listing artifacts of run {run_id} on {}/{}",
+                repo.owner(),
+                repo.name()
+            );
+            api.list_action_run_artifacts(
+                repo.owner(),
+                repo.name(),
+                run_id,
+                forgejo_api::structs::ListActionRunArtifactsQuery::default(),
+            )
+            .await?
+        }
+        None => {
+            crate::verbose_log!("Listing artifacts on {}/{}", repo.owner(), repo.name());
+            api.list_action_artifacts(
+                repo.owner(),
+                repo.name(),
+                ListActionArtifactsQuery::default(),
+            )
+            .await?
+        }
+    };
+
+    crate::output::print_list(
+        &artifacts,
+        &["ID", "NAME", "SIZE", "EXPIRES"],
+        |artifact| {
+            vec![
+                artifact
+                    .id
+                    .map(|id| id.to_string())
+                    .unwrap_or_else(|| "?".to_string()),
+                artifact.name.as_deref().unwrap_or("?").to_string(),
+                artifact
+                    .size_in_bytes
+                    .map(format_size)
+                    .unwrap_or_else(|| "?".to_string()),
+                if artifact.expired == Some(true) {
+                    "expired".to_string()
+                } else {
+                    artifact
+                        .expires_at
+                        .map(|t| t.date().to_string())
+                        .unwrap_or_else(|| "?".to_string())
+                },
+            ]
+        },
+    );
+
+    Ok(())
+}
+
+/// Find an artifact by numeric id first, falling back to a server-side name search.
+async fn find_artifact(repo: &RepoName, api: &Forgejo, arg: &str) -> eyre::Result<ActionArtifact> {
+    if let Ok(id) = arg.parse::<i64>() {
+        crate::verbose_log!(
+            "Looking up artifact by id {id} on {}/{}",
+            repo.owner(),
+            repo.name()
+        );
+        match api.get_action_artifact(repo.owner(), repo.name(), id).await {
+            Ok(artifact) => return Ok(artifact),
+            Err(ForgejoError::ApiError(forgejo_api::ApiError {
+                kind: forgejo_api::ApiErrorKind::NotFound { .. },
+                ..
+            })) => {
+                crate::verbose_log!("No artifact with id {id}, falling back to name search");
+            }
+            Err(e) => return Err(e.into()),
+        }
+    }
+
+    crate::verbose_log!(
+        "Searching for artifact named '{arg}' on {}/{}",
+        repo.owner(),
+        repo.name()
+    );
+    let artifacts = api
+        .list_action_artifacts(
+            repo.owner(),
+            repo.name(),
+            ListActionArtifactsQuery {
+                name: Some(arg.to_string()),
+            },
+        )
+        .await?;
+
+    artifacts
+        .into_iter()
+        .find(|artifact| artifact.name.as_deref() == Some(arg))
+        .ok_or_else(|| eyre::eyre!("could not find artifact {arg}"))
+}
+
+async fn download_artifact(
+    repo: &RepoName,
+    api: &Forgejo,
+    artifact: String,
+    output: Option<std::path::PathBuf>,
+) -> eyre::Result<()> {
+    use tokio::io::AsyncWriteExt;
+
+    let found = find_artifact(repo, api, &artifact).await?;
+    let id = found.id.ok_or_eyre("artifact does not have id")?;
+    let name = found.name.as_deref().unwrap_or(&artifact);
+
+    crate::verbose_log!(
+        "Downloading artifact {id} on {}/{}",
+        repo.owner(),
+        repo.name()
+    );
+    let file = api
+        .download_action_artifact(repo.owner(), repo.name(), id)
+        .await?;
+
+    let default_output = std::path::PathBuf::from(format!("{name}.zip"));
+    let real_output = output.as_deref().unwrap_or(&default_output);
+    tokio::fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(real_output)
+        .await?
+        .write_all(file.as_ref())
+        .await?;
+
+    crate::output::success(&format!(
+        "Downloaded {name} into {}",
+        real_output.display()
+    ));
+
+    Ok(())
+}
+
+async fn delete_artifact(
+    repo: &RepoName,
+    api: &Forgejo,
+    artifact: String,
+    force: bool,
+    dry_run: bool,
+) -> eyre::Result<()> {
+    if dry_run {
+        crate::output::dry_run(&format!(
+            "delete artifact {artifact} on {}/{}",
+            repo.owner(),
+            repo.name()
+        ));
+        return Ok(());
+    }
+
+    if !force
+        && !crate::yes_mode()
+        && !crate::prompt_bool(&format!("Delete artifact '{artifact}'?"), false).await?
+    {
+        crate::output::info("Not deleted");
+        return Ok(());
+    }
+
+    let found = find_artifact(repo, api, &artifact).await?;
+    let id = found.id.ok_or_eyre("artifact does not have id")?;
+
+    crate::verbose_log!(
+        "Deleting artifact {id} on {}/{}",
+        repo.owner(),
+        repo.name()
+    );
+    api.delete_action_artifact(repo.owner(), repo.name(), id)
+        .await?;
+    crate::output::success(&format!("Deleted artifact {artifact}"));
+
+    Ok(())
+}
+
+/// Format a byte count as a human-readable size, e.g. `1.5 MiB`.
+fn format_size(bytes: i64) -> String {
+    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
+
+    if bytes < 0 {
+        return "?".to_string();
+    }
+
+    let mut size = bytes as f64;
+    let mut unit = 0;
+    while size >= 1024.0 && unit < UNITS.len() - 1 {
+        size /= 1024.0;
+        unit += 1;
+    }
+
+    if unit == 0 {
+        format!("{bytes} B")
+    } else {
+        format!("{size:.1} {}", UNITS[unit])
     }
 }
 
@@ -507,5 +1105,33 @@ mod tests {
     #[test]
     fn parse_dispatch_kvs_no_equals_is_error() {
         assert!(parse_dispatch_kvs("no-equals").is_err());
+    }
+
+    #[test]
+    fn format_size_bytes() {
+        assert_eq!(format_size(0), "0 B");
+        assert_eq!(format_size(512), "512 B");
+        assert_eq!(format_size(1023), "1023 B");
+    }
+
+    #[test]
+    fn format_size_kibibytes() {
+        assert_eq!(format_size(1024), "1.0 KiB");
+        assert_eq!(format_size(1536), "1.5 KiB");
+    }
+
+    #[test]
+    fn format_size_mebibytes() {
+        assert_eq!(format_size(5 * 1024 * 1024), "5.0 MiB");
+    }
+
+    #[test]
+    fn format_size_gibibytes() {
+        assert_eq!(format_size(2 * 1024 * 1024 * 1024), "2.0 GiB");
+    }
+
+    #[test]
+    fn format_size_negative_is_unknown() {
+        assert_eq!(format_size(-1), "?");
     }
 }
