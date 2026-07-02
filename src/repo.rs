@@ -1,7 +1,7 @@
 use std::{io::Write, path::PathBuf, str::FromStr};
 
 use clap::{Args, Subcommand};
-use eyre::{eyre, OptionExt, Result};
+use eyre::{eyre, Context, OptionExt, Result};
 use forgejo_api::{structs::CreateRepoOption, Forgejo};
 use url::Url;
 
@@ -149,7 +149,10 @@ impl RepoInfo {
                 // remote, matching behavior of git push, gh, etc.
                 if name.is_none() {
                     let all_remotes = local_repo.remotes()?;
-                    if all_remotes.iter().any(|r| r == Some("origin")) {
+                    if all_remotes
+                        .iter()
+                        .any(|r| matches!(r, Ok(Some("origin"))))
+                    {
                         name = Some("origin".to_owned());
                         crate::verbose_log!("Multiple remotes found, falling back to 'origin'");
                     }
