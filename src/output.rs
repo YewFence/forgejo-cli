@@ -148,7 +148,9 @@ pub fn relative_time(dt: &time::OffsetDateTime) -> String {
 
 /// Get the terminal width, falling back to 80.
 fn terminal_width() -> u16 {
-    crossterm::terminal::size().map(|(w, _)| w).unwrap_or(80)
+    terminal_size::terminal_size()
+        .map(|(w, _)| w.0)
+        .unwrap_or(80)
 }
 
 /// Color a state string (green for open, red for closed).
