@@ -857,7 +857,7 @@ impl RepoCommand {
                 template,
                 website,
             } => {
-                let repo = RepoInfo::get_current(host_name, repo.as_ref(), None, &keys)?;
+                let repo = RepoInfo::get_current(host_name, repo.as_ref(), None, keys)?;
                 let api = keys.get_api(repo.host_url()).await?;
                 let repo = repo
                     .name()
@@ -888,7 +888,7 @@ impl RepoCommand {
                 ));
             }
             RepoCommand::Units { repo, cmd } => {
-                let repo = RepoInfo::get_current(host_name, repo.as_ref(), None, &keys)?;
+                let repo = RepoInfo::get_current(host_name, repo.as_ref(), None, keys)?;
                 let api = keys.get_api(repo.host_url()).await?;
                 let repo = repo
                     .name()
