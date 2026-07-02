@@ -222,6 +222,30 @@ pub enum PrSubcommand {
         #[clap(subcommand)]
         command: Option<ReviewCommand>,
     },
+    /// Assign users to a pull request
+    Assign {
+        /// The pull request to assign users to
+        #[clap(long, short)]
+        pr: Option<IssueId>,
+        /// Usernames to assign
+        #[clap(required = true)]
+        users: Vec<String>,
+        /// The repo to operate on (alternative to owner/repo#id syntax)
+        #[clap(long, short = 'r')]
+        repo: Option<RepoArg>,
+    },
+    /// Unassign users from a pull request
+    Unassign {
+        /// The pull request to unassign users from
+        #[clap(long, short)]
+        pr: Option<IssueId>,
+        /// Usernames to unassign
+        #[clap(required = true)]
+        users: Vec<String>,
+        /// The repo to operate on (alternative to owner/repo#id syntax)
+        #[clap(long, short = 'r')]
+        repo: Option<RepoArg>,
+    },
 }
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug)]
@@ -547,6 +571,22 @@ impl PrCommand {
                     }
                 }
             }
+            Assign {
+                pr,
+                users,
+                repo: _,
+            } => {
+                let (repo, pr) = try_get_pr_number(repo, &api, pr.map(|pr| pr.number)).await?;
+                crate::issues::edit_assignees(&repo, &api, pr, users, vec![]).await?
+            }
+            Unassign {
+                pr,
+                users,
+                repo: _,
+            } => {
+                let (repo, pr) = try_get_pr_number(repo, &api, pr.map(|pr| pr.number)).await?;
+                crate::issues::edit_assignees(&repo, &api, pr, vec![], users).await?
+            }
         }
         Ok(())
     }
@@ -564,7 +604,9 @@ impl PrCommand {
             | Reopen { repo, pr, .. }
             | Merge { repo, pr, .. }
             | Browse { repo, id: pr, .. }
-            | Review { repo, id: pr, .. } => {
+            | Review { repo, id: pr, .. }
+            | Assign { repo, pr, .. }
+            | Unassign { repo, pr, .. } => {
                 repo.as_ref().or(pr.as_ref().and_then(|x| x.repo.as_ref()))
             }
         }
@@ -591,7 +633,9 @@ impl PrCommand {
             | Reopen { pr, .. }
             | Merge { pr, .. }
             | Browse { id: pr, .. }
-            | Review { id: pr, .. } => match pr {
+            | Review { id: pr, .. }
+            | Assign { pr, .. }
+            | Unassign { pr, .. } => match pr {
                 Some(pr) => eyre::eyre!(
                     "can't figure out what repo to access, try specifying with `--repo` or `{{owner}}/{{repo}}#{}`",
                     pr.number

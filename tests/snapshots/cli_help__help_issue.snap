@@ -10,6 +10,8 @@ Commands:
   comment    Add a comment on an issue
   close      Close an issue
   reopen     Reopen a closed issue
+  assign     Assign users to an issue
+  unassign   Unassign users from an issue
   search     Search for an issue in a repo
   view       View an issue's info
   templates  List the issue templates in a repo

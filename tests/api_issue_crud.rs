@@ -1,7 +1,7 @@
 mod common;
 
 use predicates::prelude::*;
-use wiremock::matchers::{method, path};
+use wiremock::matchers::{body_partial_json, method, path};
 use wiremock::{Mock, ResponseTemplate};
 
 // ---------------------------------------------------------------------------
@@ -152,6 +152,89 @@ async fn issue_view_json() {
         .success()
         .stdout(predicate::str::contains("\"title\": \"Bug report\""))
         .stdout(predicate::str::contains("\"number\": 1"));
+}
+
+// ===========================================================================
+// 2b. Issue assign / unassign
+// ===========================================================================
+
+fn assignee_obj(login: &str) -> serde_json::Value {
+    serde_json::json!({
+        "id": 7,
+        "login": login,
+        "full_name": login,
+        "email": format!("{login}@example.com"),
+        "avatar_url": "",
+        "html_url": format!("https://example.com/{login}"),
+        "created": "2024-01-01T00:00:00Z",
+        "last_login": "2024-01-01T00:00:00Z"
+    })
+}
+
+#[tokio::test]
+async fn issue_assign_merges_existing_assignees() {
+    let instance = common::TestInstance::start().await;
+
+    let mut issue = mock_issue_obj();
+    issue["assignees"] = serde_json::json!([assignee_obj("alice")]);
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/alice/repo/issues/1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(issue.clone()))
+        .expect(1)
+        .mount(&instance.server)
+        .await;
+
+    Mock::given(method("PATCH"))
+        .and(path("/api/v1/repos/alice/repo/issues/1"))
+        .and(body_partial_json(serde_json::json!({
+            "assignees": ["alice", "bob"]
+        })))
+        .respond_with(ResponseTemplate::new(201).set_body_json(issue))
+        .expect(1)
+        .mount(&instance.server)
+        .await;
+
+    instance
+        .fj()
+        .args(["issue", "assign", "alice/repo#1", "bob"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Updated assignees for issue #1"));
+}
+
+/// Regression test against upstream 8b82c17's inverted retain, which kept
+/// only the users being unassigned and silently dropped everyone else.
+#[tokio::test]
+async fn issue_unassign_preserves_other_assignees() {
+    let instance = common::TestInstance::start().await;
+
+    let mut issue = mock_issue_obj();
+    issue["assignees"] = serde_json::json!([assignee_obj("alice"), assignee_obj("bob")]);
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/alice/repo/issues/1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(issue.clone()))
+        .expect(1)
+        .mount(&instance.server)
+        .await;
+
+    Mock::given(method("PATCH"))
+        .and(path("/api/v1/repos/alice/repo/issues/1"))
+        .and(body_partial_json(serde_json::json!({
+            "assignees": ["bob"]
+        })))
+        .respond_with(ResponseTemplate::new(201).set_body_json(issue))
+        .expect(1)
+        .mount(&instance.server)
+        .await;
+
+    instance
+        .fj()
+        .args(["issue", "unassign", "alice/repo#1", "alice"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Updated assignees for issue #1"));
 }
 
 #[tokio::test]

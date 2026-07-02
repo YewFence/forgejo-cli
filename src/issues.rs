@@ -102,6 +102,26 @@ pub enum IssueSubcommand {
         #[clap(long, short = 'r')]
         repo: Option<RepoArg>,
     },
+    /// Assign users to an issue
+    Assign {
+        issue: IssueId,
+        /// Usernames to assign
+        #[clap(required = true)]
+        users: Vec<String>,
+        /// The repo to operate on (alternative to owner/repo#id syntax)
+        #[clap(long, short = 'r')]
+        repo: Option<RepoArg>,
+    },
+    /// Unassign users from an issue
+    Unassign {
+        issue: IssueId,
+        /// Usernames to unassign
+        #[clap(required = true)]
+        users: Vec<String>,
+        /// The repo to operate on (alternative to owner/repo#id syntax)
+        #[clap(long, short = 'r')]
+        repo: Option<RepoArg>,
+    },
     /// Search for an issue in a repo
     Search {
         /// The repo to search in
@@ -340,6 +360,16 @@ impl IssueCommand {
                 with_msg,
                 repo: _,
             } => reopen_issue(repo, &api, issue.number, with_msg).await?,
+            Assign {
+                issue,
+                users,
+                repo: _,
+            } => edit_assignees(repo, &api, issue.number, users, vec![]).await?,
+            Unassign {
+                issue,
+                users,
+                repo: _,
+            } => edit_assignees(repo, &api, issue.number, vec![], users).await?,
             Browse { id, repo: _ } => browse_issue(repo, &api, id.number).await?,
             Comment {
                 issue,
@@ -361,6 +391,8 @@ impl IssueCommand {
             | Edit { repo, issue, .. }
             | Close { repo, issue, .. }
             | Reopen { repo, issue, .. }
+            | Assign { repo, issue, .. }
+            | Unassign { repo, issue, .. }
             | Comment { repo, issue, .. }
             | Browse {
                 repo, id: issue, ..
@@ -378,6 +410,8 @@ impl IssueCommand {
             | Edit { issue, .. }
             | Close { issue, .. }
             | Reopen { issue, .. }
+            | Assign { issue, .. }
+            | Unassign { issue, .. }
             | Comment { issue, .. }
             | Browse { id: issue, .. } => eyre::eyre!(
                 "can't figure out what repo to access, try specifying with `--repo` or `{{owner}}/{{repo}}#{}`",
@@ -1085,21 +1119,14 @@ pub async fn edit_assignees(
     let issue_data = api
         .issue_get_issue(repo.owner(), repo.name(), issue)
         .await?;
-    let mut assignees: Vec<String> = issue_data
+    let current: Vec<String> = issue_data
         .assignees
         .unwrap_or_default()
         .iter()
         .filter_map(|u| u.login.clone())
         .collect();
 
-    for name in &rm {
-        assignees.retain(|a| a != name);
-    }
-    for name in add {
-        if !assignees.iter().any(|a| a == &name) {
-            assignees.push(name);
-        }
-    }
+    let assignees = apply_assignee_changes(current, add, &rm);
 
     api.issue_edit_issue(
         repo.owner(),
@@ -1121,6 +1148,20 @@ pub async fn edit_assignees(
     .await?;
     crate::output::success(&format!("Updated assignees for issue #{issue}"));
     Ok(())
+}
+
+/// Apply assignee additions and removals to the current assignee list.
+///
+/// Username matching is case-insensitive (Forgejo usernames are), but the
+/// casing of names sent to the server is preserved as given.
+fn apply_assignee_changes(mut assignees: Vec<String>, add: Vec<String>, rm: &[String]) -> Vec<String> {
+    assignees.retain(|a| !rm.iter().any(|r| a.eq_ignore_ascii_case(r)));
+    for name in add {
+        if !assignees.iter().any(|a| a.eq_ignore_ascii_case(&name)) {
+            assignees.push(name);
+        }
+    }
+    assignees
 }
 
 pub async fn close_issue(
@@ -1243,5 +1284,35 @@ mod tests {
         let result = "repo#42".parse::<IssueId>();
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), IssueIdError::Repo(_)));
+    }
+
+    fn names(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn assignee_removal_preserves_other_assignees() {
+        // Regression guard against upstream 8b82c17's inverted retain, which
+        // kept only the users being unassigned and dropped everyone else.
+        let result = apply_assignee_changes(names(&["alice", "bob"]), vec![], &names(&["alice"]));
+        assert_eq!(result, names(&["bob"]));
+    }
+
+    #[test]
+    fn assignee_removal_is_case_insensitive() {
+        let result = apply_assignee_changes(names(&["Alice", "bob"]), vec![], &names(&["alice"]));
+        assert_eq!(result, names(&["bob"]));
+    }
+
+    #[test]
+    fn assignee_add_dedups_case_insensitively() {
+        let result = apply_assignee_changes(names(&["Alice"]), names(&["alice", "bob"]), &[]);
+        assert_eq!(result, names(&["Alice", "bob"]));
+    }
+
+    #[test]
+    fn assignee_add_preserves_input_casing() {
+        let result = apply_assignee_changes(vec![], names(&["BoB"]), &[]);
+        assert_eq!(result, names(&["BoB"]));
     }
 }
