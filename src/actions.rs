@@ -732,9 +732,26 @@ async fn find_artifact(repo: &RepoName, api: &Forgejo, arg: &str) -> eyre::Resul
         )
         .await?;
 
-    artifacts
+    // Forgejo keeps a same-named artifact per workflow run, so a bare name
+    // can match several; acting on an arbitrary one would silently target a
+    // stale build. Prefer the newest and say so.
+    let mut matches: Vec<ActionArtifact> = artifacts
         .into_iter()
-        .find(|artifact| artifact.name.as_deref() == Some(arg))
+        .filter(|artifact| artifact.name.as_deref() == Some(arg))
+        .collect();
+    if matches.len() > 1 {
+        matches.sort_by_key(|a| a.id);
+        let newest = matches.pop().expect("len checked above");
+        crate::output::info(&format!(
+            "{} artifacts named '{arg}' found, using newest (id {}); pass an id to be explicit",
+            matches.len() + 1,
+            newest.id.map_or_else(|| "?".to_string(), |id| id.to_string()),
+        ));
+        return Ok(newest);
+    }
+    matches
+        .into_iter()
+        .next()
         .ok_or_else(|| eyre::eyre!("could not find artifact {arg}"))
 }
 

@@ -661,13 +661,20 @@ pub async fn view_pr(repo: &RepoName, api: &Forgejo, id: Option<i64>) -> eyre::R
     let id = pr.number.ok_or_eyre("pr does not have number")?;
 
     // Only fetched for the human-readable archived-repo warning; --json output
-    // must not make the extra API call. Uses the PR's base repo, which is where
-    // interactions are disabled.
+    // must not make the extra API call, and a failed lookup must not abort the
+    // view (the warning is decorative). Uses the PR's base repo, which is
+    // where interactions are disabled.
     let repo_info = if crate::json_mode() {
         None
     } else {
-        let base_repo = repo_name_from_pr(&pr)?;
-        Some(api.repo_get(base_repo.owner(), base_repo.name()).await?)
+        let repo_info = match repo_name_from_pr(&pr) {
+            Ok(base_repo) => api.repo_get(base_repo.owner(), base_repo.name()).await.ok(),
+            Err(_) => None,
+        };
+        if repo_info.is_none() {
+            crate::verbose_log!("Skipping archived-repo check: base repo lookup failed");
+        }
+        repo_info
     };
 
     crate::output::print_or_json(&pr, || {
@@ -2167,10 +2174,40 @@ pub async fn view_pr_reviews(
     let pr = try_get_pr(repo, api, pr).await?;
     let pr_number = pr.number.ok_or_eyre("pr does not have number")?;
     let repo = repo_name_from_pr(&pr)?;
-    let reviews = api
+    let mut reviews = api
         .repo_list_pull_reviews(repo.owner(), repo.name(), pr_number)
         .all()
         .await?;
+
+    // Review-request entries aren't submitted reviews; drop them up front so
+    // the empty/stale messaging below stays accurate.
+    reviews.retain(|r| r.state.as_deref() != Some("REQUEST_REVIEW"));
+
+    if crate::json_mode() {
+        let visible: Vec<&PullReview> = reviews
+            .iter()
+            .filter(|r| {
+                include_stale || !(r.stale.unwrap_or(false) || r.dismissed.unwrap_or(false))
+            })
+            .collect();
+        if comments {
+            let mut out = Vec::with_capacity(visible.len());
+            for review in visible {
+                let review_id = review.id.ok_or_eyre("review does not have id")?;
+                let review_comments = api
+                    .repo_get_pull_review_comments(repo.owner(), repo.name(), pr_number, review_id)
+                    .await?;
+                out.push(serde_json::json!({
+                    "review": review,
+                    "comments": review_comments,
+                }));
+            }
+            println!("{}", serde_json::to_string_pretty(&out)?);
+        } else {
+            println!("{}", serde_json::to_string_pretty(&visible)?);
+        }
+        return Ok(());
+    }
 
     if reviews.is_empty() {
         println!("No reviews.");
@@ -2180,10 +2217,7 @@ pub async fn view_pr_reviews(
     let mut first = false;
 
     for review in &reviews {
-        // skip request review reviews, since they are usually not relevant
-        if (!include_stale && (review.stale.unwrap_or(false) || review.dismissed.unwrap_or(false)))
-            || (review.state.as_deref() == Some("REQUEST_REVIEW"))
-        {
+        if !include_stale && (review.stale.unwrap_or(false) || review.dismissed.unwrap_or(false)) {
             continue;
         }
         if !first {
@@ -2193,10 +2227,7 @@ pub async fn view_pr_reviews(
         }
         print_pr_review(review)?;
         if comments {
-            let review_id = match review.id {
-                Some(id) => id,
-                None => return Ok(()),
-            };
+            let review_id = review.id.ok_or_eyre("review does not have id")?;
             let review_comments = api
                 .repo_get_pull_review_comments(repo.owner(), repo.name(), pr_number, review_id)
                 .await?;
@@ -2204,7 +2235,8 @@ pub async fn view_pr_reviews(
         }
     }
 
-    // if first is still false, that means all reviews were stale or dismissed and nothing was printed.
+    // if first is still false, that means all remaining reviews were stale or
+    // dismissed and nothing was printed.
     if !first {
         println!("Only stale or dismissed reviews, use -a to display them.");
     }

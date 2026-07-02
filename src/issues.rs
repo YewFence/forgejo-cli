@@ -434,10 +434,20 @@ pub async fn label_names_to_ids(
         .into_iter()
         .filter_map(|l| Some((l.name?, l.id?)))
         .collect::<BTreeMap<_, _>>();
-    Ok(names
-        .into_iter()
-        .filter_map(|name| all_labels.remove(&name))
-        .collect())
+    let mut ids = Vec::with_capacity(names.len());
+    let mut missing = Vec::new();
+    for name in names {
+        match all_labels.remove(&name) {
+            Some(id) => ids.push(id),
+            // Dropping unknown names silently would widen or disable the
+            // caller's label filter instead of failing it.
+            None => missing.push(name),
+        }
+    }
+    if !missing.is_empty() {
+        eyre::bail!("label(s) not found: {}", missing.join(", "));
+    }
+    Ok(ids)
 }
 
 pub async fn maybe_label_names_to_ids(
@@ -603,11 +613,16 @@ pub async fn view_issue(repo: &RepoName, api: &Forgejo, id: i64) -> eyre::Result
     }
 
     // Only fetched for the human-readable archived-repo warning; --json output
-    // must not make the extra API call.
+    // must not make the extra API call, and a failed lookup must not abort the
+    // view (the warning is decorative).
     let repo_info = if crate::json_mode() {
         None
     } else {
-        Some(api.repo_get(repo.owner(), repo.name()).await?)
+        let repo_info = api.repo_get(repo.owner(), repo.name()).await;
+        if repo_info.is_err() {
+            crate::verbose_log!("Skipping archived-repo check: repo lookup failed");
+        }
+        repo_info.ok()
     };
 
     crate::output::print_or_json(&issue, || {

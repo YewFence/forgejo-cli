@@ -1160,7 +1160,6 @@ pub enum UnitsSubcommand {
         branch: Option<String>,
 
         /// Set the URL for an external wiki.
-        /// If no URL is given, the external wiki is instead disabled.
         #[clap(long)]
         external_url: Option<Url>,
 

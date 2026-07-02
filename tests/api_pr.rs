@@ -257,6 +257,116 @@ async fn pr_view_json() {
         .stdout(predicate::str::contains("\"number\": 1"));
 }
 
+/// The archived-warning repo lookup is decorative; if it fails (scoped token,
+/// transient error), the view must still print the PR.
+#[tokio::test]
+async fn pr_view_survives_failed_repo_lookup() {
+    let instance = common::TestInstance::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/alice/repo/pulls/1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(mock_pr_obj()))
+        .mount(&instance.server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/alice/repo"))
+        .respond_with(ResponseTemplate::new(500))
+        .mount(&instance.server)
+        .await;
+
+    instance
+        .fj()
+        .args(["pr", "view", "alice/repo#1"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Test PR"));
+}
+
+/// --json pr review must emit machine-readable output, not the human renderer.
+#[tokio::test]
+async fn pr_review_list_json() {
+    let instance = common::TestInstance::start().await;
+    mount_pr_reviews(
+        &instance,
+        serde_json::json!([mock_review_obj(5, "bob", "APPROVED", false, 0)]),
+    )
+    .await;
+
+    let assert = instance
+        .fj()
+        .args(["--json", "pr", "review", "alice/repo#1", "list"])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("--json pr review output must parse as JSON");
+    assert_eq!(parsed[0]["state"], "APPROVED");
+}
+
+/// A PR with only review-request entries has no submitted reviews; it must
+/// not print the misleading stale/dismissed hint.
+#[tokio::test]
+async fn pr_review_list_request_review_only() {
+    let instance = common::TestInstance::start().await;
+    mount_pr_reviews(
+        &instance,
+        serde_json::json!([mock_review_obj(7, "dave", "REQUEST_REVIEW", false, 0)]),
+    )
+    .await;
+
+    instance
+        .fj()
+        .args(["pr", "review", "alice/repo#1", "list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("No reviews."))
+        .stdout(predicate::str::contains("stale or dismissed").not());
+}
+
+/// Unknown label names on the --base/--head path must error instead of
+/// silently widening the results.
+#[tokio::test]
+async fn pr_search_base_unknown_label_errors() {
+    let instance = common::TestInstance::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/alice/repo/labels"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!([{
+                    "id": 1,
+                    "name": "bug",
+                    "color": "ff0000",
+                    "description": "",
+                    "exclusive": false,
+                    "is_archived": false,
+                    "url": "https://example.com/api/v1/repos/alice/repo/labels/1"
+                }]))
+                .insert_header("x-total-count", "1"),
+        )
+        .mount(&instance.server)
+        .await;
+
+    // The pulls endpoint must never be hit when label resolution fails.
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/alice/repo/pulls"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(0)
+        .mount(&instance.server)
+        .await;
+
+    instance
+        .fj()
+        .args([
+            "pr", "search", "--repo", "alice/repo", "--base", "main", "--labels", "nosuch",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("label(s) not found: nosuch"));
+}
+
 #[tokio::test]
 async fn pr_view_archived_warning() {
     let instance = common::TestInstance::start().await;
