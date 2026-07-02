@@ -1,8 +1,33 @@
 mod common;
 
 use predicates::prelude::*;
-use wiremock::matchers::{method, path};
+use wiremock::matchers::{method, path, query_param};
 use wiremock::{Mock, ResponseTemplate};
+
+// Regression test for upstream c35fc0f: issue queries must request type=issues
+// so the server excludes pull requests from the response.
+#[tokio::test]
+async fn issue_search_sends_type_issues() {
+    let instance = common::TestInstance::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/alice/repo/issues"))
+        .and(query_param("type", "issues"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!([]))
+                .insert_header("x-total-count", "0"),
+        )
+        .expect(1)
+        .mount(&instance.server)
+        .await;
+
+    instance
+        .fj()
+        .args(["issue", "search", "--repo", "alice/repo"])
+        .assert()
+        .success();
+}
 
 #[tokio::test]
 async fn issue_search_json() {
