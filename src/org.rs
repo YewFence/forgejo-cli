@@ -305,7 +305,7 @@ async fn view_org(api: &Forgejo, name: String) -> eyre::Result<()> {
 
 async fn create_org(api: &Forgejo, name: String, options: OrgOptions) -> eyre::Result<()> {
     if !name.chars().all(is_valid_name_char) {
-        eyre::bail!("Organization names can only have alphanumeric characters, dash, underscore, or period. \n  If you want a name with other characters, try setting the --full-name flag");
+        eyre::bail!("Organization names can only have alphanumeric characters, dashes, underscores, or periods. \n  If you want a name with other characters, try setting the --full-name flag");
     }
     if !name
         .chars()
