@@ -486,6 +486,8 @@ pub enum RepoCommand {
 
     /// Edit a repository's properties
     Edit {
+        /// The repo to edit
+        #[clap(long, short = 'r')]
         repo: Option<RepoArg>,
 
         /// Archive or unarchive
@@ -528,6 +530,8 @@ pub enum RepoCommand {
     /// Manage a repo's units
     #[clap(alias = "unit")]
     Units {
+        /// The repo whose units to manage
+        #[clap(long, short = 'r')]
         repo: Option<RepoArg>,
 
         #[clap(subcommand)]
@@ -857,6 +861,7 @@ impl RepoCommand {
                     .name()
                     .ok_or_eyre("couldn't get repo name, please specify")?;
 
+                crate::verbose_log!("Editing repo {}/{}", repo.owner(), repo.name());
                 api.repo_edit(
                     repo.owner(),
                     repo.name(),
@@ -874,6 +879,11 @@ impl RepoCommand {
                     },
                 )
                 .await?;
+                crate::output::success(&format!(
+                    "Edited repository {}/{}",
+                    repo.owner(),
+                    repo.name()
+                ));
             }
             RepoCommand::Units { repo, cmd } => {
                 let repo = RepoInfo::get_current(host_name, repo.as_ref(), None, &keys)?;
@@ -881,6 +891,16 @@ impl RepoCommand {
                 let repo = repo
                     .name()
                     .ok_or_eyre("couldn't get repo name, please specify")?;
+
+                let unit_name = match &cmd {
+                    UnitsSubcommand::Issues { .. } => "issues",
+                    UnitsSubcommand::Prs { .. } => "pull requests",
+                    UnitsSubcommand::Actions { .. } => "actions",
+                    UnitsSubcommand::Wiki { .. } => "wiki",
+                    UnitsSubcommand::Packages { .. } => "packages",
+                    UnitsSubcommand::Projects { .. } => "projects",
+                    UnitsSubcommand::Releases { .. } => "releases",
+                };
 
                 let edit_option = match cmd {
                     UnitsSubcommand::Issues { enable } => forgejo_api::structs::EditRepoOption {
@@ -959,8 +979,18 @@ impl RepoCommand {
                     },
                 };
 
+                crate::verbose_log!(
+                    "Updating {unit_name} unit for {}/{}",
+                    repo.owner(),
+                    repo.name()
+                );
                 api.repo_edit(repo.owner(), repo.name(), edit_option)
                     .await?;
+                crate::output::success(&format!(
+                    "Updated {unit_name} unit for {}/{}",
+                    repo.owner(),
+                    repo.name()
+                ));
             }
         };
         Ok(())

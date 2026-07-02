@@ -1,7 +1,7 @@
 mod common;
 
 use predicates::prelude::*;
-use wiremock::matchers::{method, path};
+use wiremock::matchers::{body_partial_json, method, path};
 use wiremock::{Mock, ResponseTemplate};
 
 // ---------------------------------------------------------------------------
@@ -190,6 +190,74 @@ async fn repo_migrate() {
         .assert()
         .success()
         .stderr(predicate::str::contains("Done! View online at"));
+}
+
+// ===========================================================================
+// Edit / Units
+// ===========================================================================
+
+#[tokio::test]
+async fn repo_edit_description() {
+    let instance = common::TestInstance::start().await;
+
+    Mock::given(method("PATCH"))
+        .and(path("/api/v1/repos/alice/my-repo"))
+        .and(body_partial_json(serde_json::json!({
+            "description": "new desc",
+            "private": null,
+            "name": null
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(mock_repo_json("alice", "my-repo")))
+        .expect(1)
+        .mount(&instance.server)
+        .await;
+
+    instance
+        .fj()
+        .args([
+            "repo",
+            "edit",
+            "--repo",
+            "alice/my-repo",
+            "--description",
+            "new desc",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Edited repository alice/my-repo"));
+}
+
+#[tokio::test]
+async fn repo_units_disable_issues() {
+    let instance = common::TestInstance::start().await;
+
+    Mock::given(method("PATCH"))
+        .and(path("/api/v1/repos/alice/my-repo"))
+        .and(body_partial_json(serde_json::json!({
+            "has_issues": false,
+            "has_wiki": null
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(mock_repo_json("alice", "my-repo")))
+        .expect(1)
+        .mount(&instance.server)
+        .await;
+
+    instance
+        .fj()
+        .args([
+            "repo",
+            "units",
+            "--repo",
+            "alice/my-repo",
+            "issues",
+            "--enable",
+            "false",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains(
+            "Updated issues unit for alice/my-repo",
+        ));
 }
 
 // ===========================================================================
