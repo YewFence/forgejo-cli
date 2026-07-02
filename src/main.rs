@@ -270,16 +270,54 @@ async fn tempfile(ext: Option<&str>) -> tokio::io::Result<(tokio::fs::File, std:
     Ok((file, path))
 }
 
-fn ssh_url_parse(s: &str) -> Result<url::Url, url::ParseError> {
-    url::Url::parse(s).or_else(|_| {
-        let mut new_s = String::new();
-        new_s.push_str("ssh://");
+use std::sync::OnceLock;
+static SSH_CONFIG: OnceLock<Option<ssh2_config::SshConfig>> = OnceLock::new();
 
-        let auth_end = s.find("@").unwrap_or(0);
-        new_s.push_str(&s[..auth_end]);
-        new_s.push_str(&s[auth_end..].replacen(":", "/", 1));
-        url::Url::parse(&new_s)
+fn get_ssh_config() -> &'static Option<ssh2_config::SshConfig> {
+    SSH_CONFIG.get_or_init(|| {
+        ssh2_config::SshConfig::parse_default_file(ssh2_config::ParseRule::ALLOW_UNKNOWN_FIELDS)
+            .ok()
     })
+}
+
+fn ssh_url_parse(s: &str) -> Result<url::Url, url::ParseError> {
+    ssh_url_parse_with(s, get_ssh_config().as_ref())
+}
+
+/// Parse a git remote URL, accepting scp-style `[user@]host:path` remotes,
+/// and resolve ssh host aliases via ssh config `HostName` entries.
+///
+/// Unlike upstream (1df2ad5), the scp-style rewrite also runs when
+/// `Url::parse` fails outright: WHATWG parsing rejects `git@host:path`
+/// (`@` can't appear in a scheme), which is the most common ssh remote
+/// format. HostName resolution is gated to ssh-scheme URLs so https
+/// remotes are never rewritten by ssh config.
+fn ssh_url_parse_with(
+    s: &str,
+    config: Option<&ssh2_config::SshConfig>,
+) -> Result<url::Url, url::ParseError> {
+    let mut url = match url::Url::parse(s) {
+        Ok(url) if !url.cannot_be_a_base() => url,
+        _ => {
+            // scp-style [user@]host:path remote
+            let mut new_s = String::from("ssh://");
+            let auth_end = s.find('@').unwrap_or(0);
+            new_s.push_str(&s[..auth_end]);
+            new_s.push_str(&s[auth_end..].replacen(':', "/", 1));
+            url::Url::parse(&new_s)?
+        }
+    };
+    if url.scheme() == "ssh" {
+        if let (Some(config), Some(host_str)) = (config, url.host_str().map(str::to_owned)) {
+            let host_params = config.query(&host_str);
+            if let Some(host_name) = host_params.host_name {
+                // Expand '%h' and '%%' per ssh_config(5)
+                let expanded = host_name.replace("%h", &host_str).replace("%%", "%");
+                url.set_host(Some(&expanded))?;
+            }
+        }
+    }
+    Ok(url)
 }
 
 fn host_name(url: &url::Url) -> &str {
@@ -303,7 +341,6 @@ fn open_url(url: &str) -> eyre::Result<()> {
     open::that_detached(url).wrap_err("Failed to open URL")
 }
 
-use std::sync::OnceLock;
 static SPECIAL_RENDER: OnceLock<SpecialRender> = OnceLock::new();
 
 static JSON_MODE: OnceLock<bool> = OnceLock::new();
@@ -1140,9 +1177,24 @@ pub async fn edit_labels(
 mod tests {
     use super::*;
 
+    /// Build an SshConfig from a literal config string, so tests never read
+    /// the developer's real ~/.ssh/config.
+    fn test_ssh_config(content: &str) -> ssh2_config::SshConfig {
+        use std::io::BufReader;
+        ssh2_config::SshConfig::default()
+            .parse(
+                &mut BufReader::new(content.as_bytes()),
+                ssh2_config::ParseRule::ALLOW_UNKNOWN_FIELDS,
+            )
+            .unwrap()
+    }
+
+    // These tests pass config: None so they stay hermetic. The scp-style
+    // cases double as regression guards proving the fork did not inherit
+    // upstream 1df2ad5's breakage of `git@host:path` remotes.
     #[test]
     fn ssh_url_parse_scp_style() {
-        let url = ssh_url_parse("git@codeberg.org:alice/my-repo.git").unwrap();
+        let url = ssh_url_parse_with("git@codeberg.org:alice/my-repo.git", None).unwrap();
         assert_eq!(url.scheme(), "ssh");
         assert_eq!(url.host_str(), Some("codeberg.org"));
         assert_eq!(url.path(), "/alice/my-repo.git");
@@ -1150,16 +1202,48 @@ mod tests {
 
     #[test]
     fn ssh_url_parse_already_valid() {
-        let url = ssh_url_parse("ssh://git@codeberg.org/alice/my-repo.git").unwrap();
+        let url = ssh_url_parse_with("ssh://git@codeberg.org/alice/my-repo.git", None).unwrap();
         assert_eq!(url.scheme(), "ssh");
         assert_eq!(url.host_str(), Some("codeberg.org"));
     }
 
     #[test]
     fn ssh_url_parse_github_style() {
-        let url = ssh_url_parse("git@github.com:user/repo").unwrap();
+        let url = ssh_url_parse_with("git@github.com:user/repo", None).unwrap();
         assert_eq!(url.host_str(), Some("github.com"));
         assert_eq!(url.path(), "/user/repo");
+    }
+
+    #[test]
+    fn ssh_url_parse_userless_scp_style() {
+        // Parses as a valid URL with scheme "codeberg.org", so it takes the
+        // cannot_be_a_base path rather than the parse-failure path.
+        let url = ssh_url_parse_with("codeberg.org:alice/repo.git", None).unwrap();
+        assert_eq!(url.scheme(), "ssh");
+        assert_eq!(url.host_str(), Some("codeberg.org"));
+        assert_eq!(url.path(), "/alice/repo.git");
+    }
+
+    #[test]
+    fn ssh_url_parse_resolves_ssh_config_alias() {
+        let config = test_ssh_config("Host cb\n  HostName codeberg.org\n");
+        let url = ssh_url_parse_with("git@cb:owner/repo", Some(&config)).unwrap();
+        assert_eq!(url.host_str(), Some("codeberg.org"));
+        assert_eq!(url.path(), "/owner/repo");
+    }
+
+    #[test]
+    fn ssh_url_parse_expands_percent_tokens() {
+        let config = test_ssh_config("Host cb\n  HostName %h.internal\n");
+        let url = ssh_url_parse_with("git@cb:owner/repo", Some(&config)).unwrap();
+        assert_eq!(url.host_str(), Some("cb.internal"));
+    }
+
+    #[test]
+    fn ssh_url_parse_leaves_https_untouched() {
+        let config = test_ssh_config("Host example.com\n  HostName rewritten.example\n");
+        let url = ssh_url_parse_with("https://example.com/owner/repo", Some(&config)).unwrap();
+        assert_eq!(url.host_str(), Some("example.com"));
     }
 
     #[test]
