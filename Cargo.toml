@@ -81,10 +81,6 @@ rstest = "0.25"
 tempfile = "3"
 wiremock = "0.6"
 
-[build-dependencies]
-git2 = { version = "0.21.0", features = ["vendored-libgit2"] }
-uuid = "1.16.0"
-
 # Optimize serde and forgejo-api in dev/test builds to prevent
 # stack overflow when deserializing deeply nested types (e.g.
 # PullRequest with Repository objects in head/base).
