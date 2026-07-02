@@ -83,8 +83,8 @@ impl AuthCommand {
                     crate::output::error(&format!("Not logged in to {host}"));
                 } else {
                     if use_ssh.unwrap_or(true) {
-                        let already_present = keys.default_ssh.insert(host.to_string());
-                        if already_present {
+                        let newly_added = keys.default_ssh.insert(host.to_string());
+                        if newly_added {
                             crate::output::success(&format!("Now using SSH for {host} by default"));
                             keys.save().await?;
                         } else {
