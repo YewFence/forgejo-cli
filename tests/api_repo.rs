@@ -342,12 +342,37 @@ async fn repo_units_disable_issues() {
 // Readme
 // ===========================================================================
 
+fn contents_entry(name: &str, kind: &str) -> serde_json::Value {
+    serde_json::json!({
+        "name": name,
+        "path": name,
+        "type": kind,
+        "size": 42,
+        "download_url": null,
+        "html_url": null,
+        "git_url": null,
+        "url": null,
+        "last_commit_when": "2024-01-01T00:00:00Z",
+        "submodule_git_url": null
+    })
+}
+
 #[tokio::test]
 async fn repo_readme() {
     let instance = common::TestInstance::start().await;
 
-    // The readme command tries "README.md" first via
-    // GET /api/v1/repos/{owner}/{repo}/raw/{filepath}
+    // The readme command lists the repo contents to find the readme file,
+    // then fetches it via GET /api/v1/repos/{owner}/{repo}/raw/{filepath}.
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/alice/my-repo/contents"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!([contents_entry("README.md", "file")])),
+        )
+        .expect(1)
+        .mount(&instance.server)
+        .await;
+
     Mock::given(method("GET"))
         .and(path("/api/v1/repos/alice/my-repo/raw/README.md"))
         .respond_with(
@@ -363,6 +388,57 @@ async fn repo_readme() {
         .assert()
         .success()
         .stdout(predicate::str::contains("Hello World"));
+}
+
+#[tokio::test]
+async fn repo_readme_nonstandard_casing() {
+    let instance = common::TestInstance::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/alice/my-repo/contents"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            contents_entry("src", "dir"),
+            contents_entry("ReadMe.MD", "file")
+        ])))
+        .expect(1)
+        .mount(&instance.server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/alice/my-repo/raw/ReadMe.MD"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("# Cased Readme"))
+        .expect(1)
+        .mount(&instance.server)
+        .await;
+
+    instance
+        .fj()
+        .args(["repo", "readme", "alice/my-repo"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Cased Readme"));
+}
+
+#[tokio::test]
+async fn repo_readme_missing() {
+    let instance = common::TestInstance::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/alice/my-repo/contents"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            contents_entry("src", "dir"),
+            contents_entry("main.rs", "file")
+        ])))
+        .expect(1)
+        .mount(&instance.server)
+        .await;
+
+    instance
+        .fj()
+        .args(["repo", "readme", "alice/my-repo"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Repo does not have a README"));
 }
 
 // ===========================================================================
