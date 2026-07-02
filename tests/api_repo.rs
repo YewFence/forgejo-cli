@@ -338,6 +338,34 @@ async fn repo_units_disable_issues() {
         ));
 }
 
+#[tokio::test]
+async fn repo_units_no_flags_shows_status_without_patching() {
+    let instance = common::TestInstance::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/alice/my-repo"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(mock_repo_json("alice", "my-repo")))
+        .expect(1)
+        .mount(&instance.server)
+        .await;
+
+    Mock::given(method("PATCH"))
+        .and(path("/api/v1/repos/alice/my-repo"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(mock_repo_json("alice", "my-repo")))
+        .expect(0)
+        .mount(&instance.server)
+        .await;
+
+    instance
+        .fj()
+        .args(["repo", "units", "--repo", "alice/my-repo", "issues"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "issues unit is enabled for alice/my-repo",
+        ));
+}
+
 // ===========================================================================
 // Readme
 // ===========================================================================

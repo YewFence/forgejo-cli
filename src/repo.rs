@@ -982,6 +982,43 @@ impl RepoCommand {
                     },
                 };
 
+                if edit_option == NOOP_EDIT_REPO_OPTION {
+                    crate::verbose_log!(
+                        "No changes requested; fetching {unit_name} unit status for {}/{}",
+                        repo.owner(),
+                        repo.name()
+                    );
+                    let repo_data = api.repo_get(repo.owner(), repo.name()).await?;
+                    let enabled = match unit_name {
+                        "issues" => repo_data.has_issues,
+                        "pull requests" => repo_data.has_pull_requests,
+                        "actions" => repo_data.has_actions,
+                        "wiki" => repo_data.has_wiki,
+                        "packages" => repo_data.has_packages,
+                        "projects" => repo_data.has_projects,
+                        "releases" => repo_data.has_releases,
+                        _ => unreachable!("unit_name covers the same variants"),
+                    };
+                    let status = serde_json::json!({
+                        "unit": unit_name,
+                        "enabled": enabled,
+                    });
+                    crate::output::print_or_json(&status, || {
+                        let state = match enabled {
+                            Some(true) => "enabled",
+                            Some(false) => "disabled",
+                            None => "unknown",
+                        };
+                        println!(
+                            "{unit_name} unit is {state} for {}/{}",
+                            repo.owner(),
+                            repo.name()
+                        );
+                        Ok(())
+                    })?;
+                    return Ok(());
+                }
+
                 crate::verbose_log!(
                     "Updating {unit_name} unit for {}/{}",
                     repo.owner(),
