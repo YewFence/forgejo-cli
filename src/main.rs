@@ -97,8 +97,20 @@ impl Command {
     }
 }
 
+fn main() -> eyre::Result<()> {
+    // Command futures embed large forgejo-api structs, and unoptimized builds
+    // keep many copies of them live at once; the default 1 MiB main-thread
+    // stack on Windows overflows. Run the async main on a thread with a
+    // bigger stack instead.
+    std::thread::Builder::new()
+        .stack_size(16 * 1024 * 1024)
+        .spawn(async_main)?
+        .join()
+        .expect("async main thread panicked")
+}
+
 #[tokio::main]
-async fn main() -> eyre::Result<()> {
+async fn async_main() -> eyre::Result<()> {
     let args = App::parse();
 
     let _ = SPECIAL_RENDER.set(SpecialRender::new(args.style.unwrap_or_default()));

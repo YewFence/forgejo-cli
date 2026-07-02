@@ -654,6 +654,77 @@ async fn pr_create_untracked_branch() {
 }
 
 // ===========================================================================
+// 3b. PR status
+// ===========================================================================
+
+/// Covers the forgejo-api 0.11 upgrade: the `skipped` commit status state
+/// (adapted from upstream f8dbe99) and a relative `target_url`, which failed
+/// to deserialize on forgejo-api 0.9 (target_url was url::Url; Forgejo
+/// returns relative paths) and works on 0.11 (String).
+#[tokio::test]
+async fn pr_status_skipped_and_relative_target_url() {
+    let instance = common::TestInstance::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/alice/repo/pulls/1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(mock_pr_obj()))
+        .mount(&instance.server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/alice/repo/pulls/1/commits"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!([{
+                    "sha": "abc123",
+                    "url": "https://example.com/api/v1/repos/alice/repo/git/commits/abc123",
+                    "html_url": "https://example.com/alice/repo/commit/abc123",
+                    "commit": {
+                        "message": "Add feature",
+                        "url": "https://example.com/api/v1/repos/alice/repo/git/commits/abc123",
+                        "author": {"name": "Alice", "email": "a@example.com", "date": "2024-01-15T10:00:00Z"},
+                        "committer": {"name": "Alice", "email": "a@example.com", "date": "2024-01-15T10:00:00Z"}
+                    },
+                    "created": "2024-01-15T10:00:00Z"
+                }]))
+                .insert_header("x-total-count", "1"),
+        )
+        .mount(&instance.server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/alice/repo/commits/abc123/status"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "state": "skipped",
+            "sha": "abc123",
+            "total_count": 1,
+            "commit_url": "https://example.com/api/v1/repos/alice/repo/git/commits/abc123",
+            "url": "https://example.com/api/v1/repos/alice/repo/commits/abc123/status",
+            "statuses": [{
+                "id": 1,
+                "context": "ci/lint",
+                "description": "skipped",
+                "status": "skipped",
+                "target_url": "/alice/repo/actions/runs/187/jobs/0",
+                "url": "https://example.com/api/v1/repos/alice/repo/statuses/abc123",
+                "created_at": "2024-01-15T10:00:00Z",
+                "updated_at": "2024-01-15T10:00:00Z"
+            }]
+        })))
+        .expect(1)
+        .mount(&instance.server)
+        .await;
+
+    instance
+        .fj()
+        .args(["pr", "status", "alice/repo#1"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Skipped"))
+        .stdout(predicate::str::contains("ci/lint"));
+}
+
+// ===========================================================================
 // 4. PR close
 // ===========================================================================
 

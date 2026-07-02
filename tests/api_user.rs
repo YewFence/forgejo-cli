@@ -96,6 +96,8 @@ fn ssh_key_json() -> serde_json::Value {
         "title": "laptop",
         "url": "https://example.com/api/v1/user/keys/1",
         "created_at": "2024-01-01T00:00:00Z",
+        // forgejo-api 0.11 requires this key to be present (no serde default)
+        "updated_at": "2024-01-01T00:00:00Z",
         "read_only": false,
         "fingerprint": "SHA256:abc123...",
         "key_type": "ssh-ed25519"
@@ -422,7 +424,9 @@ async fn user_orgs() {
                 "description": "An org",
                 "website": "",
                 "location": "",
-                "visibility": "public"
+                "visibility": "public",
+                // forgejo-api 0.11 requires this key to be present (no serde default)
+                "created": "2024-01-01T00:00:00Z"
             }
         ])))
         .mount(&instance.server)

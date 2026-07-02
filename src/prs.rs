@@ -986,6 +986,7 @@ fn print_pr_status(pr_status: &PrStatus) -> eyre::Result<()> {
                     CommitStatusState::Pending => print!("{yellow}Pending{reset}"),
                     CommitStatusState::Warning => print!("{bright_yellow}Warning{reset}"),
                     CommitStatusState::Failure => print!("{bright_red}Failure{reset}"),
+                    CommitStatusState::Skipped => print!("{light_grey}Skipped{reset}"),
                     CommitStatusState::Error => print!("{bright_red}Error{reset}"),
                 };
                 println!(" {dash} {context}");
