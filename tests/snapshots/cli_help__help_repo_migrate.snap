@@ -1,0 +1,71 @@
+---
+source: tests/cli_help.rs
+assertion_line: 48
+expression: stdout
+---
+Migrate or mirror an existing repository
+
+Usage: fj repo migrate [OPTIONS] <REPO> <[OWNER]/NAME>
+
+Arguments:
+  <REPO>
+          URL of the repo to migrate
+
+  <[OWNER]/NAME>
+          Name of the new mirror, and optionally which org/user should own it
+
+Options:
+      --config <CONFIG>
+          Directory containing fj configuration and credentials
+          
+          [env: FORGEJO_CONFIG=]
+
+  -m, --mirror
+          Whether to mirror the repo instead of migrating it
+
+  -H, --host <HOST>
+          Forgejo instance host or URL to use instead of auto-detection
+          
+          [env: FORGEJO_HOST]
+
+  -p, --private
+          Whether the new migration should be private
+
+  -i, --include <INCLUDE>
+          Comma-separated list of items to include. Defaults to nothing but git data.
+          
+          These are `lfs`, `wiki`, `issues`, `prs`, `milestones`, `labels`, and `releases`. You can use `all` to include everything.
+
+      --token <TOKEN>
+          Forgejo API token to use instead of stored credentials
+          
+          [env: FORGEJO_TOKEN]
+
+  -L, --lfs-endpoint <LFS_ENDPOINT>
+          The URL to fetch LFS files from
+
+  -s, --service <SERVICE>
+          The type of Git service the original repo is on. Defaults to `git`
+          
+          [possible values: git, github, gitlab, forgejo, gitea, gogs, onedev, gitbucket, codebase]
+
+  -t, --source-token
+          If enabled, will read an access token in from stdin to use for fetching the source repo.
+          
+          Mutually exclusive with `--login`
+
+  -y, --yes
+          Skip all confirmation prompts (auto-confirm destructive actions)
+
+  -l, --login
+          If enabled, will read a username and password from stdin to use for fetching.
+          
+          Mutually exclusive with `--source-token`.
+          
+          This is not recommended, `--source-token` should be used instead whenever possible.
+
+  -v, --verbose
+          Show verbose output (API calls, resolution steps)
+
+  -h, --help
+          Print help (see a summary with '-h')

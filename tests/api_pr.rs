@@ -360,7 +360,14 @@ async fn pr_search_base_unknown_label_errors() {
     instance
         .fj()
         .args([
-            "pr", "search", "--repo", "alice/repo", "--base", "main", "--labels", "nosuch",
+            "pr",
+            "search",
+            "--repo",
+            "alice/repo",
+            "--base",
+            "main",
+            "--labels",
+            "nosuch",
         ])
         .assert()
         .failure()
@@ -977,7 +984,13 @@ async fn pr_search_base_uses_pulls_endpoint() {
     instance
         .fj()
         .args([
-            "--json", "pr", "search", "--repo", "alice/repo", "--base", "main",
+            "--json",
+            "pr",
+            "search",
+            "--repo",
+            "alice/repo",
+            "--base",
+            "main",
         ])
         .assert()
         .success()
@@ -1012,7 +1025,13 @@ async fn pr_search_head_uses_pulls_endpoint() {
     instance
         .fj()
         .args([
-            "--json", "pr", "search", "--repo", "alice/repo", "--head", "feature",
+            "--json",
+            "pr",
+            "search",
+            "--repo",
+            "alice/repo",
+            "--head",
+            "feature",
         ])
         .assert()
         .success()

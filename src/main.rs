@@ -37,8 +37,21 @@ pub const USER_AGENT: &str = concat!(
 #[derive(Parser, Debug)]
 #[command(version)]
 pub struct App {
-    #[clap(long, short = 'H', global = true)]
+    /// Directory containing fj configuration and credentials
+    #[clap(long, global = true, env = "FORGEJO_CONFIG")]
+    config: Option<PathBuf>,
+    /// Forgejo instance host or URL to use instead of auto-detection
+    #[clap(
+        long,
+        short = 'H',
+        global = true,
+        env = "FORGEJO_HOST",
+        hide_env_values = true
+    )]
     host: Option<String>,
+    /// Forgejo API token to use instead of stored credentials
+    #[clap(long, global = true, env = "FORGEJO_TOKEN", hide_env_values = true)]
+    token: Option<String>,
     #[clap(long)]
     style: Option<Style>,
     /// Output results as JSON (for scripting and agents)
@@ -113,6 +126,8 @@ fn main() -> eyre::Result<()> {
 async fn async_main() -> eyre::Result<()> {
     let args = App::parse();
 
+    keys::set_config_dir(args.config.clone())?;
+    let _ = AUTH_TOKEN.set(args.token.clone());
     let _ = SPECIAL_RENDER.set(SpecialRender::new(args.style.unwrap_or_default()));
     let _ = JSON_MODE.set(args.json);
     let _ = YES_MODE.set(args.yes);
@@ -365,6 +380,7 @@ fn open_url(url: &str) -> eyre::Result<()> {
 
 static SPECIAL_RENDER: OnceLock<SpecialRender> = OnceLock::new();
 
+static AUTH_TOKEN: OnceLock<Option<String>> = OnceLock::new();
 static JSON_MODE: OnceLock<bool> = OnceLock::new();
 static YES_MODE: OnceLock<bool> = OnceLock::new();
 static VERBOSE_MODE: OnceLock<bool> = OnceLock::new();
@@ -388,6 +404,10 @@ fn yes_mode() -> bool {
 
 fn verbose_mode() -> bool {
     *VERBOSE_MODE.get().unwrap_or(&false)
+}
+
+fn auth_token() -> Option<&'static str> {
+    AUTH_TOKEN.get().and_then(|token| token.as_deref())
 }
 
 fn special_render() -> &'static SpecialRender {

@@ -4,10 +4,9 @@ use clap::{Args, Subcommand};
 use eyre::{bail, OptionExt};
 use forgejo_api::{
     structs::{
-        ActionArtifact, CreateOrUpdateSecretOption, CreateVariableOption,
-        ListActionArtifactsQuery, ListActionRunsQuery, ListActionRunsQueryStatus,
-        ListActionTasksQuery, ListActionTasksQueryStatus, RepoGetActionJobLogsQuery,
-        UpdateVariableOption,
+        ActionArtifact, CreateOrUpdateSecretOption, CreateVariableOption, ListActionArtifactsQuery,
+        ListActionRunsQuery, ListActionRunsQueryStatus, ListActionTasksQuery,
+        ListActionTasksQueryStatus, RepoGetActionJobLogsQuery, UpdateVariableOption,
     },
     Forgejo, ForgejoError,
 };
@@ -312,9 +311,7 @@ impl ActionsCommand {
             },
 
             ActionsSubcommand::Artifact { command } => match command {
-                ActionsArtifactSubcommand::List { run } => {
-                    list_artifacts(repo, &api, run).await?
-                }
+                ActionsArtifactSubcommand::List { run } => list_artifacts(repo, &api, run).await?,
                 ActionsArtifactSubcommand::Download { artifact, output } => {
                     download_artifact(repo, &api, artifact, output).await?
                 }
@@ -602,8 +599,7 @@ async fn run_logs(repo: &RepoName, api: &Forgejo, id: i64, job: Option<i64>) -> 
 
 async fn cancel_run(repo: &RepoName, api: &Forgejo, id: i64) -> eyre::Result<()> {
     crate::verbose_log!("Cancelling run {id} on {}/{}", repo.owner(), repo.name());
-    api.cancel_action_run(repo.owner(), repo.name(), id)
-        .await?;
+    api.cancel_action_run(repo.owner(), repo.name(), id).await?;
     crate::output::success(&format!("Cancelled run {id}"));
 
     Ok(())
@@ -634,8 +630,7 @@ async fn delete_run(
     }
 
     crate::verbose_log!("Deleting run {id} on {}/{}", repo.owner(), repo.name());
-    api.delete_action_run(repo.owner(), repo.name(), id)
-        .await?;
+    api.delete_action_run(repo.owner(), repo.name(), id).await?;
     crate::output::success(&format!("Deleted run {id}"));
 
     Ok(())
@@ -668,31 +663,27 @@ async fn list_artifacts(repo: &RepoName, api: &Forgejo, run: Option<i64>) -> eyr
         }
     };
 
-    crate::output::print_list(
-        &artifacts,
-        &["ID", "NAME", "SIZE", "EXPIRES"],
-        |artifact| {
-            vec![
+    crate::output::print_list(&artifacts, &["ID", "NAME", "SIZE", "EXPIRES"], |artifact| {
+        vec![
+            artifact
+                .id
+                .map(|id| id.to_string())
+                .unwrap_or_else(|| "?".to_string()),
+            artifact.name.as_deref().unwrap_or("?").to_string(),
+            artifact
+                .size_in_bytes
+                .map(format_size)
+                .unwrap_or_else(|| "?".to_string()),
+            if artifact.expired == Some(true) {
+                "expired".to_string()
+            } else {
                 artifact
-                    .id
-                    .map(|id| id.to_string())
-                    .unwrap_or_else(|| "?".to_string()),
-                artifact.name.as_deref().unwrap_or("?").to_string(),
-                artifact
-                    .size_in_bytes
-                    .map(format_size)
-                    .unwrap_or_else(|| "?".to_string()),
-                if artifact.expired == Some(true) {
-                    "expired".to_string()
-                } else {
-                    artifact
-                        .expires_at
-                        .map(|t| t.date().to_string())
-                        .unwrap_or_else(|| "?".to_string())
-                },
-            ]
-        },
-    );
+                    .expires_at
+                    .map(|t| t.date().to_string())
+                    .unwrap_or_else(|| "?".to_string())
+            },
+        ]
+    });
 
     Ok(())
 }
@@ -745,7 +736,9 @@ async fn find_artifact(repo: &RepoName, api: &Forgejo, arg: &str) -> eyre::Resul
         crate::output::info(&format!(
             "{} artifacts named '{arg}' found, using newest (id {}); pass an id to be explicit",
             matches.len() + 1,
-            newest.id.map_or_else(|| "?".to_string(), |id| id.to_string()),
+            newest
+                .id
+                .map_or_else(|| "?".to_string(), |id| id.to_string()),
         ));
         return Ok(newest);
     }
@@ -786,10 +779,7 @@ async fn download_artifact(
         .write_all(file.as_ref())
         .await?;
 
-    crate::output::success(&format!(
-        "Downloaded {name} into {}",
-        real_output.display()
-    ));
+    crate::output::success(&format!("Downloaded {name} into {}", real_output.display()));
 
     Ok(())
 }
@@ -821,11 +811,7 @@ async fn delete_artifact(
     let found = find_artifact(repo, api, &artifact).await?;
     let id = found.id.ok_or_eyre("artifact does not have id")?;
 
-    crate::verbose_log!(
-        "Deleting artifact {id} on {}/{}",
-        repo.owner(),
-        repo.name()
-    );
+    crate::verbose_log!("Deleting artifact {id} on {}/{}", repo.owner(), repo.name());
     api.delete_action_artifact(repo.owner(), repo.name(), id)
         .await?;
     crate::output::success(&format!("Deleted artifact {artifact}"));

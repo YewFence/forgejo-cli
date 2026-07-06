@@ -4,15 +4,30 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     io::ErrorKind,
     path::PathBuf,
+    sync::OnceLock,
 };
 use tokio::io::AsyncWriteExt;
 use url::Url;
 
+static CONFIG_DIR: OnceLock<Option<PathBuf>> = OnceLock::new();
+
+pub fn set_config_dir(path: Option<PathBuf>) -> eyre::Result<()> {
+    CONFIG_DIR
+        .set(path)
+        .map_err(|_| eyre!("config directory was already initialized"))
+}
+
 /// Return the data directory for storing keys.json.
 ///
-/// Respects `FJ_DATA_DIR` env var if set (useful for testing), otherwise
+/// Respects `--config`, `FORGEJO_CONFIG`, and `FJ_DATA_DIR` if set, otherwise
 /// falls back to the platform-specific data directory.
 fn data_dir() -> eyre::Result<PathBuf> {
+    if let Some(dir) = CONFIG_DIR.get().and_then(|path| path.as_ref()) {
+        return Ok(dir.clone());
+    }
+    if let Ok(dir) = std::env::var("FORGEJO_CONFIG") {
+        return Ok(PathBuf::from(dir));
+    }
     if let Ok(dir) = std::env::var("FJ_DATA_DIR") {
         return Ok(PathBuf::from(dir));
     }
@@ -76,6 +91,15 @@ impl KeyInfo {
     }
 
     pub async fn get_api(&mut self, url: &Url) -> eyre::Result<Forgejo> {
+        if let Some(token) = crate::auth_token() {
+            crate::verbose_log!(
+                "Using token from --token or environment for {}",
+                crate::host_name(url)
+            );
+            return Forgejo::with_user_agent(Auth::Token(token), url.clone(), crate::USER_AGENT)
+                .map_err(Into::into);
+        }
+
         match self.get_login(url) {
             Some(login) => {
                 crate::verbose_log!("Using saved login for {}", crate::host_name(url));

@@ -149,10 +149,7 @@ impl RepoInfo {
                 // remote, matching behavior of git push, gh, etc.
                 if name.is_none() {
                     let all_remotes = local_repo.remotes()?;
-                    if all_remotes
-                        .iter()
-                        .any(|r| matches!(r, Ok(Some("origin"))))
-                    {
+                    if all_remotes.iter().any(|r| matches!(r, Ok(Some("origin")))) {
                         name = Some("origin".to_owned());
                         crate::verbose_log!("Multiple remotes found, falling back to 'origin'");
                     }
@@ -408,17 +405,17 @@ pub enum RepoCommand {
         /// The type of Git service the original repo is on. Defaults to `git`
         #[clap(long, short)]
         service: Option<MigrateService>,
-        /// If enabled, will read an access token in from stdin to use for fetching.
+        /// If enabled, will read an access token in from stdin to use for fetching the source repo.
         ///
         /// Mutually exclusive with `--login`
-        #[clap(long, short)]
-        token: bool,
+        #[clap(long = "source-token", short = 't', conflicts_with = "login")]
+        source_token: bool,
         /// If enabled, will read a username and password from stdin to use for fetching.
         ///
-        /// Mutually exclusive with `--token`.
+        /// Mutually exclusive with `--source-token`.
         ///
-        /// This is not recommended, `--token` should be used instead whenever possible.
-        #[clap(long, short)]
+        /// This is not recommended, `--source-token` should be used instead whenever possible.
+        #[clap(long, short, conflicts_with = "source_token")]
         login: bool,
     },
     /// View a repo's info
@@ -674,7 +671,7 @@ impl RepoCommand {
                 include,
                 lfs_endpoint,
                 service,
-                token,
+                source_token,
                 login,
             } => {
                 let current_repo = RepoInfo::get_current(host_name, None, None, keys)?;
@@ -688,7 +685,7 @@ impl RepoCommand {
                     include,
                     lfs_endpoint,
                     service,
-                    token,
+                    source_token,
                     login,
                 )
                 .await?
@@ -1497,7 +1494,7 @@ async fn migrate_repo(
     include: Option<MigrateInclude>,
     lfs_endpoint: Option<url::Url>,
     service: Option<MigrateService>,
-    token: bool,
+    source_token: bool,
     login: bool,
 ) -> eyre::Result<()> {
     let include = include.unwrap_or_default();
@@ -1524,7 +1521,7 @@ async fn migrate_repo(
         (None, None)
     };
 
-    let auth_token = if token {
+    let auth_token = if source_token {
         let auth_token = crate::readline("Token: ").await?.trim().to_owned();
         Some(auth_token.trim().to_owned())
     } else {

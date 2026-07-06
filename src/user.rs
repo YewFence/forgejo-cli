@@ -1530,20 +1530,21 @@ mod tests {
 
     fn repo_with_name(full_name: Option<&str>) -> forgejo_api::structs::Repository {
         // Every field with a custom serde deserializer must be present.
-        let mut repo: forgejo_api::structs::Repository = serde_json::from_value(serde_json::json!({
-            "archived_at": null,
-            "avatar_url": null,
-            "clone_url": null,
-            "created_at": null,
-            "html_url": null,
-            "languages_url": null,
-            "mirror_updated": null,
-            "original_url": null,
-            "ssh_url": null,
-            "updated_at": null,
-            "url": null
-        }))
-        .unwrap();
+        let mut repo: forgejo_api::structs::Repository =
+            serde_json::from_value(serde_json::json!({
+                "archived_at": null,
+                "avatar_url": null,
+                "clone_url": null,
+                "created_at": null,
+                "html_url": null,
+                "languages_url": null,
+                "mirror_updated": null,
+                "original_url": null,
+                "ssh_url": null,
+                "updated_at": null,
+                "url": null
+            }))
+            .unwrap();
         repo.full_name = full_name.map(str::to_owned);
         repo
     }

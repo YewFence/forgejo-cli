@@ -37,6 +37,17 @@ impl TestInstance {
         cmd
     }
 
+    /// Get a Command configured through FORGEJO_HOST instead of --host.
+    pub fn fj_with_host_env(&self) -> Command {
+        let mut cmd = Command::cargo_bin("fj").unwrap();
+        cmd.env("FORGEJO_HOST", self.server.uri());
+        // Skip all interactive prompts
+        cmd.arg("--yes");
+        // Isolate the data directory to avoid concurrent file access races.
+        cmd.env("FJ_DATA_DIR", self._data_dir.path());
+        cmd
+    }
+
     /// Mount a mock for GET /api/v1/user (current user).
     pub async fn mock_current_user(&self, username: &str) {
         Mock::given(method("GET"))
@@ -80,7 +91,7 @@ impl TestInstance {
             .await;
     }
 
-    fn repo_json(owner: &str, name: &str) -> serde_json::Value {
+    pub(crate) fn repo_json(owner: &str, name: &str) -> serde_json::Value {
         serde_json::json!({
                 "id": 1,
                 "owner": {

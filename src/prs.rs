@@ -579,19 +579,11 @@ impl PrCommand {
                     }
                 }
             }
-            Assign {
-                pr,
-                users,
-                repo: _,
-            } => {
+            Assign { pr, users, repo: _ } => {
                 let (repo, pr) = try_get_pr_number(repo, &api, pr.map(|pr| pr.number)).await?;
                 crate::issues::edit_assignees(&repo, &api, pr, users, vec![]).await?
             }
-            Unassign {
-                pr,
-                users,
-                repo: _,
-            } => {
+            Unassign { pr, users, repo: _ } => {
                 let (repo, pr) = try_get_pr_number(repo, &api, pr.map(|pr| pr.number)).await?;
                 crate::issues::edit_assignees(&repo, &api, pr, vec![], users).await?
             }

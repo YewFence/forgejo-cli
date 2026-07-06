@@ -1169,7 +1169,11 @@ pub async fn edit_assignees(
 ///
 /// Username matching is case-insensitive (Forgejo usernames are), but the
 /// casing of names sent to the server is preserved as given.
-fn apply_assignee_changes(mut assignees: Vec<String>, add: Vec<String>, rm: &[String]) -> Vec<String> {
+fn apply_assignee_changes(
+    mut assignees: Vec<String>,
+    add: Vec<String>,
+    rm: &[String],
+) -> Vec<String> {
     assignees.retain(|a| !rm.iter().any(|r| a.eq_ignore_ascii_case(r)));
     for name in add {
         if !assignees.iter().any(|a| a.eq_ignore_ascii_case(&name)) {

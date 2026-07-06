@@ -37,6 +37,7 @@ fn help_subcommand(#[case] cmd: &str) {
 }
 
 #[rstest]
+#[case("repo migrate")]
 #[case("actions run")]
 #[case("actions artifact")]
 fn help_nested_subcommand(#[case] cmd: &str) {
