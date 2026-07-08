@@ -16,12 +16,7 @@ impl WhoAmICommand {
             .host_url()
             .clone();
         let host = crate::host_name(&url);
-        // Guard before get_api: it falls back to unauthenticated access when
-        // logged out, which would surface as a confusing API error instead.
-        if keys.get_login(&url).is_none() {
-            eyre::bail!("not logged in");
-        }
-        let api = keys.get_api(&url).await?;
+        let api = keys.get_authenticated_api(&url).await?;
         let current_user = api.user_get_current().await?;
         let name = current_user
             .login

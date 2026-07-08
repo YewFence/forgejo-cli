@@ -1,5 +1,6 @@
 mod common;
 
+use assert_cmd::Command;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, ResponseTemplate};
 
@@ -61,6 +62,59 @@ fn tag_json(name: &str, sha: &str) -> serde_json::Value {
         "tarball_url": "",
         "zipball_url": ""
     })
+}
+
+#[test]
+fn missing_keys_file_is_silent_without_verbose() {
+    let config_dir = tempfile::tempdir().expect("failed to create config dir");
+
+    let output = Command::cargo_bin("fj")
+        .unwrap()
+        .args([
+            "--config",
+            config_dir
+                .path()
+                .to_str()
+                .expect("config path is not UTF-8"),
+            "version",
+        ])
+        .output()
+        .expect("failed to run fj");
+
+    assert!(output.status.success(), "command failed: {:?}", output);
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("keys file not found"),
+        "missing keys message should be hidden without --verbose, got: {stderr}"
+    );
+}
+
+#[test]
+fn missing_keys_file_is_verbose_diagnostic() {
+    let config_dir = tempfile::tempdir().expect("failed to create config dir");
+
+    let output = Command::cargo_bin("fj")
+        .unwrap()
+        .args([
+            "--verbose",
+            "--config",
+            config_dir
+                .path()
+                .to_str()
+                .expect("config path is not UTF-8"),
+            "version",
+        ])
+        .output()
+        .expect("failed to run fj");
+
+    assert!(output.status.success(), "command failed: {:?}", output);
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("[verbose] keys file not found, starting with empty keys"),
+        "missing keys message should be visible with --verbose, got: {stderr}"
+    );
 }
 
 // ---------------------------------------------------------------------------

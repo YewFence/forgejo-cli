@@ -53,7 +53,7 @@ impl KeyInfo {
         let this = match json {
             Ok(x) => serde_json::from_slice::<Self>(&x)?,
             Err(e) if e.kind() == ErrorKind::NotFound => {
-                crate::output::info("keys file not found, starting with empty keys");
+                crate::verbose_log!("keys file not found, starting with empty keys");
                 Self::default()
             }
             Err(e) => return Err(e.into()),
@@ -88,6 +88,17 @@ impl KeyInfo {
         let host = crate::host_name(url);
         let login_info = self.hosts.get_mut(host)?;
         Some(login_info)
+    }
+
+    fn has_auth(&self, url: &Url) -> bool {
+        crate::auth_token().is_some() || self.hosts.contains_key(crate::host_name(url))
+    }
+
+    pub async fn get_authenticated_api(&mut self, url: &Url) -> eyre::Result<Forgejo> {
+        if !self.has_auth(url) {
+            eyre::bail!("not logged in");
+        }
+        self.get_api(url).await
     }
 
     pub async fn get_api(&mut self, url: &Url) -> eyre::Result<Forgejo> {

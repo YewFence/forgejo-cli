@@ -27,6 +27,21 @@ async fn whoami_after_add_key() {
 }
 
 #[tokio::test]
+async fn whoami_with_token_and_host_env() {
+    let instance = common::TestInstance::start().await;
+
+    instance.mock_current_user("alice").await;
+
+    instance
+        .fj_with_host_env()
+        .env("FORGEJO_TOKEN", "mytoken123")
+        .args(["whoami"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("currently signed in to alice@"));
+}
+
+#[tokio::test]
 async fn whoami_not_logged_in() {
     let instance = common::TestInstance::start().await;
 
