@@ -34,6 +34,9 @@ impl TestInstance {
         cmd.arg("--yes");
         // Isolate the data directory to avoid concurrent file access races.
         cmd.env("FJ_DATA_DIR", self._data_dir.path());
+        // Keep developer or CI credentials from leaking into isolated tests.
+        cmd.env_remove("FORGEJO_HOST");
+        cmd.env_remove("FORGEJO_TOKEN");
         cmd
     }
 
@@ -45,6 +48,8 @@ impl TestInstance {
         cmd.arg("--yes");
         // Isolate the data directory to avoid concurrent file access races.
         cmd.env("FJ_DATA_DIR", self._data_dir.path());
+        // The host is intentional here, but authentication must be opt-in.
+        cmd.env_remove("FORGEJO_TOKEN");
         cmd
     }
 

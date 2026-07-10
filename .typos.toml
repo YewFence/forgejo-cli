@@ -1,0 +1,7 @@
+[default.extend-identifiers]
+# Compatibility field from the vendored forgejo-api schema.
+commiter = "commiter"
+
+[default.extend-words]
+# Commit SHA fragment in an integration-test regression comment.
+dbe = "dbe"

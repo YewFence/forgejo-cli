@@ -1,0 +1,91 @@
+[settings]
+lockfile = true
+minimum_release_age = "3d"
+
+[tools]
+# https://www.rust-lang.org/
+rust = { version = "stable", components = "rustfmt,clippy" }
+# https://github.com/suzuki-shunsuke/nllint
+"go:github.com/suzuki-shunsuke/nllint/cmd/nllint" = "1"
+# https://github.com/suzuki-shunsuke/pinact
+pinact = "4"
+# https://github.com/crate-ci/typos
+typos = "1"
+# https://github.com/gitleaks/betterleaks
+betterleaks = "1"
+# https://github.com/rhysd/actionlint
+actionlint = "1"
+
+[vars]
+nllint_excludes = "':(top,exclude)LICENSE-APACHE' ':(top,exclude)vendor/forgejo-api/LICENSE-APACHE'"
+
+[tasks.test]
+description = "Run all Rust tests"
+run = "cargo test --all-targets"
+
+[tasks."build:check"]
+description = "Check whether all Rust targets build"
+run = "cargo check --all-targets"
+
+[tasks."fmt:check"]
+description = "Check Rust code formatting"
+run = "cargo fmt -- --check"
+
+[tasks."fmt:fix"]
+description = "Fix Rust code formatting"
+run = "cargo fmt"
+
+[tasks.lint]
+description = "Run Clippy with warnings denied"
+run = "cargo clippy --all-targets -- -D warnings"
+
+[tasks."leaks:check"]
+description = "Run betterleaks checks"
+run = "betterleaks git --redact --no-banner"
+
+[tasks."typos:check"]
+description = "Run typos checks"
+run = "typos"
+
+[tasks."typos:fix"]
+description = "Fix typos"
+run = "typos --write-changes"
+
+[tasks."newline:check"]
+description = "Check final newlines and surrounding whitespace in tracked text files"
+run = "git grep -Ilz '' -- . {{ vars.nllint_excludes }} | xargs -0 nllint --trim-space"
+
+[tasks."newline:fix"]
+description = "Fix final newlines and surrounding whitespace in tracked text files"
+run = "git grep -Ilz '' -- . {{ vars.nllint_excludes }} | xargs -0 nllint --fix --trim-space"
+
+[tasks."actions:pin-offline:check"]
+description = "Check that GitHub Actions are pinned to commit hashes"
+run = "pinact run --fix=false --no-api .github/workflows/*.yml"
+
+[tasks."actions:check"]
+description = "Lint GitHub Actions workflows"
+depends = ["actions:pin-offline:check"]
+run = "actionlint .github/workflows/*.yml"
+
+[tasks.check]
+description = """
+Run read-only build, formatting, lint, test, newline, typo, leak, and GitHub Actions checks"""
+run = [
+  { tasks = ["build:check", "newline:check", "typos:check"] },
+  { task = "leaks:check" },
+  { task = "actions:check" },
+  { task = "fmt:check" },
+  { task = "lint" },
+  { task = "test" },
+]
+alias = "c"
+
+[tasks.fix]
+description = "Fix formatting, newlines, and typos"
+run = [
+  { task = "newline:fix" },
+  { task = "typos:fix" },
+  { task = "fmt:fix" },
+]
+alias = "f"

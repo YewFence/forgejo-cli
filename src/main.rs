@@ -1205,7 +1205,7 @@ pub async fn edit_labels(
 
     if !unknown_labels.is_empty() {
         if unknown_labels.len() == 1 {
-            crate::output::error(&format!("'{}' doesn't exist", &unknown_labels[0]));
+            crate::output::error(&format!("'{}' doesn't exist", unknown_labels[0]));
         } else {
             crate::output::error("The following labels don't exist:");
             for unknown_label in unknown_labels {
