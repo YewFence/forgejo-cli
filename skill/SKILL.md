@@ -9,19 +9,23 @@ CLI for Forgejo/Gitea instances. Binary name: `fj`.
 
 ## Agentic Usage
 
-Always use these global flags for non-interactive automation:
+Use `--yes` for non-interactive automation. Add `--json` when the selected
+command supports machine-readable output:
 
 ```bash
-fj --yes --json <command>        # Skip prompts + machine-readable output
-fj --yes --verbose <command>     # Skip prompts + debug API calls to stderr
+fj --yes <command>                              # Skip prompts
+fj --yes --json issue search                    # Also request JSON output
+fj --yes --verbose <command>                    # Debug API calls to stderr
 ```
 
 | Global Flag | Effect |
 |-------------|--------|
 | `--yes, -y` | Skip all confirmation prompts |
-| `--json` | JSON output (list/view commands) |
+| `--json` | JSON output on supported list/view commands |
 | `--verbose, -v` | Print API calls to stderr |
 | `-H, --host <url>` | Target instance (overrides git remote detection) |
+| `--config <dir>` | Use a specific configuration directory |
+| `--token <token>` | Use an API token instead of stored credentials |
 
 Destructive commands also accept:
 - `--force, -f` - Skip per-command confirmation
@@ -154,7 +158,7 @@ fj pr browse 10                              # Open in browser
 ### Repositories
 
 ```bash
-fj repo create myrepo -d "Description" -p   # Private (under your account)
+fj repo create myrepo -d "Description" -P   # Private (under your account)
 fj repo create myorg/myrepo -d "Description"  # Create under an organization
 fj repo fork owner/repo --name my-fork
 fj repo migrate https://github.com/user/repo myrepo  # Mirror from other forges
@@ -179,8 +183,8 @@ fj --yes repo units -r owner/repo wiki -e false    # Disable a unit
 fj --yes repo units -r owner/repo actions -e true
 
 # Labels (nested under `repo labels`, NOT top-level)
-fj --json repo labels list
-fj --json repo labels list -r owner/repo     # Cross-repo (requires -H if not in a git repo)
+fj repo labels list
+fj repo labels -r owner/repo list            # Cross-repo (requires -H if not in a git repo)
 fj repo labels list --archived               # Include archived labels
 fj repo labels create "bug" "#d73a4a" -d "Something isn't working"
 fj repo labels create "scope/api" "#0e8a16" -e  # Exclusive (scoped) label
@@ -226,9 +230,9 @@ fj --yes milestone delete "Sprint 1" --force
 
 ```bash
 fj --json org list
-fj --json org list -m                        # Only orgs you belong to
+fj --json org list -o                        # Only orgs you belong to
 fj --json org view myorg
-fj org create myorg -d "Description" -v public
+fj org create myorg -d "Description" -V public
 fj org edit myorg -d "Updated description"
 fj --json org members myorg
 fj org activity myorg
@@ -254,7 +258,7 @@ fj --yes org team repo rm myorg devs reponame --force
 fj --yes org team delete myorg devs --force
 
 # Org labels
-fj --json org label list myorg
+fj org label list myorg
 fj org label add myorg "priority" "#ff0000" -d "High priority" -e
 fj org label edit myorg "priority" --new-name "urgent" -c "#cc0000"
 fj --yes org label rm myorg "priority" --force
@@ -286,11 +290,11 @@ fj user edit name -u                         # Unset display name
 fj user edit pronouns "they/them"
 fj user edit location "Earth"
 fj user edit website "https://example.com"
-fj user edit activity -v public              # Set activity visibility
+fj user edit activity --visibility public    # Set activity visibility
 fj user edit email -a new@example.com -r old@example.com
 
 # SSH keys
-fj --json user key list
+fj user key list
 fj user key list -v                          # Verbose (detailed info)
 fj --json user key view 42
 fj user key upload ~/.ssh/id_ed25519.pub -t "My key"
@@ -298,7 +302,7 @@ fj user key upload ~/.ssh/id_ed25519.pub -r  # Read-only deploy key
 fj --yes user key delete 42 --force
 
 # GPG keys
-fj --json user gpg list
+fj user gpg list
 fj --json user gpg view 42
 fj user gpg upload "$(cat key.asc)"
 fj user gpg verify 42
@@ -356,7 +360,7 @@ fj --verbose version                         # Verbose build info (user agent, t
 fj completion bash > ~/.bash_completion.d/fj
 fj completion zsh > ~/.zfunc/_fj
 fj completion fish > ~/.config/fish/completions/fj.fish
-fj completion powershell > fj.ps1
+fj completion power-shell > fj.ps1
 ```
 
 ## Name/ID Resolution
@@ -379,7 +383,8 @@ When run inside a git repo, `fj` auto-detects the Forgejo instance and repo from
 
 ## Output Parsing
 
-With `--json`, list commands return JSON arrays and view commands return JSON objects. Pipe through `jq` for field extraction:
+On supported commands, `--json` returns JSON arrays for lists and JSON objects
+for views. Pipe through `jq` for field extraction:
 
 ```bash
 fj --json issue search -s open | jq '.[].number'

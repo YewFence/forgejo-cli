@@ -7,8 +7,9 @@ Community-maintained fork of [forgejo-cli](https://codeberg.org/forgejo-contrib/
 ```sh
 cargo build              # debug
 cargo build --release    # binary at target/release/fj
-cargo test --all-targets # full suite (93 tests)
-cargo insta review       # review changed snapshots
+cargo test --all-targets # full suite
+mise run check           # full project checks
+mise run docs:generate   # regenerate docs/cli.md from Clap
 ```
 
 Binary name is `fj` (set in Cargo.toml `[[bin]]`).
@@ -18,7 +19,7 @@ Binary name is `fj` (set in Cargo.toml `[[bin]]`).
 - **`SpecialRender` is a global singleton** -- access via `crate::special_render()`. Never construct raw ANSI codes.
 - **New subcommands should take `--repo`/`-r`** (`repo: Option<RepoArg>`) like the existing ones; the historical `--repo` inconsistency was fixed in #47 and later syncs.
 - **forgejo-api is vendored and patched** (`vendor/forgejo-api` via `[patch.crates-io]`): stock 0.11.0 rejects responses from pre-v16 servers (`Organization.created`, `PublicKey.updated_at`, and team-embedded orgs in PR responses omit presence-required keys). See `vendor/forgejo-api/PATCHES.md` before touching the dependency.
-- **`main` runs the runtime on a 16 MiB thread** (`async_main`): debug-build futures embedding forgejo-api structs overflow the default 1 MiB Windows main-thread stack. Don't move `#[tokio::main]` back onto `main`.
+- **`forgejo_cli_plus::run()` runs the runtime on a 16 MiB thread** (`async_main`): debug-build futures embedding forgejo-api structs overflow the default 1 MiB Windows main-thread stack. Keep `src/main.rs` as the thin entry point; don't move `#[tokio::main]` back onto the system main thread.
 - **`keys.save()` is per-mutation**, not on exit -- every code path that mutates `KeyInfo` must call `keys.save().await?` itself.
 
 ## Adding a new command
@@ -29,7 +30,7 @@ Follow `src/tag.rs` as the template.
 2. `<Command>Command` struct with `#[derive(Args)]`, include `remote: Option<String>` and `repo: Option<RepoArg>`
 3. `<Command>Subcommand` enum with `#[derive(Subcommand)]`
 4. `run()` calls `RepoInfo::get_current()` then `keys.get_api()`
-5. Add `mod <command>;` and enum variant in `main.rs`
+5. Add `mod <command>;` and the enum variant in `src/lib.rs`
 
 ## Conventions
 
@@ -44,10 +45,10 @@ Follow `src/tag.rs` as the template.
 
 ## Agentic / non-interactive flags
 
-Global flags (on every command):
+Automation flags:
 - `--yes` / `-y` -- skip all confirmation prompts, auto-confirm
 - `--verbose` / `-v` -- print API calls and resolution steps to stderr
-- `--json` -- machine-readable JSON output
+- `--json` -- top-level machine-readable output flag for supported commands; place it before the command
 
 Per-command flags (on destructive operations only):
 - `--force` / `-f` -- skip confirmation prompt for this operation
@@ -55,7 +56,7 @@ Per-command flags (on destructive operations only):
 
 Example agent invocation:
 ```sh
-fj --yes --json issue list
+fj --yes --json issue search
 fj --yes --json repo delete owner/repo --force
 fj repo delete owner/repo --dry-run
 ```
@@ -89,26 +90,28 @@ Run `cargo test --all-targets` before committing. All tests must pass.
 
 **Test structure:**
 - `src/*.rs` -- in-module `#[cfg(test)]` unit tests for pure functions
-- `tests/cli_help.rs` -- `insta` snapshot tests for all `--help` output
+- `tests/cli_help.rs` -- Clap schema validation and recursive help rendering for the complete command tree
+- `tests/cli_docs.rs` -- generated Markdown reference drift check
 - `tests/cli_errors.rs` -- CLI error handling and exit code tests
 - `tests/api_repo.rs`, `tests/api_tag.rs`, `tests/api_issue.rs` -- wiremock integration tests
-- `tests/dry_run.rs` -- parameterized `--dry-run` test for all 14 destructive commands
+- `tests/dry_run.rs` -- parameterized `--dry-run` tests for destructive commands
 - `tests/common/mod.rs` -- shared `TestInstance` helper (wiremock + assert_cmd)
 
 **When adding a new command:**
 - Add unit tests for any pure parsing/validation functions in the module's `#[cfg(test)]` block
-- Add a `--help` snapshot: add a `#[case("newcommmand")]` line to `tests/cli_help.rs`, run `cargo insta test --accept` to generate it
+- Run `mise run docs:generate` and commit the resulting `docs/cli.md` change
+- Recursive help coverage is automatic; do not register command paths manually
 - If the command is destructive, add a `#[case]` to `tests/dry_run.rs`
 
 **When adding a destructive command:**
 - Add a `#[case(&["...", "--dry-run"])]` line to `tests/dry_run.rs`
 - Verify the `--dry-run` check is the very first thing in the handler (before any API calls)
 
-**Snapshots:**
-- `cargo insta test` runs tests and shows pending snapshot changes
-- `cargo insta review` interactively accepts/rejects changes
-- `cargo insta test --accept` accepts all changes (use after intentional help text updates)
-- Snapshots normalize `fj.exe` to `fj` for cross-platform portability
+**Generated CLI reference:**
+- `docs/cli.md` is generated from the Clap schema; do not edit it manually
+- Run `mise run docs:generate` after changing commands, arguments, or help text
+- `mise run docs:check` verifies the committed reference without rewriting it
+- `tests/cli_help.rs` automatically checks that every command can render long help
 
 **wiremock integration tests:**
 - `TestInstance::start()` creates an isolated mock server + temp data dir

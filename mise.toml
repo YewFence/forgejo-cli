@@ -23,6 +23,14 @@ nllint_excludes = "':(top,exclude)LICENSE-APACHE' ':(top,exclude)vendor/forgejo-
 description = "Run all Rust tests"
 run = "cargo test --all-targets"
 
+[tasks."docs:generate"]
+description = "Generate the Markdown CLI reference from the Clap schema"
+run = "cargo run --quiet --example generate-cli-docs"
+
+[tasks."docs:check"]
+description = "Check that the generated Markdown CLI reference is current"
+run = "cargo test --test cli_docs"
+
 [tasks."build:check"]
 description = "Check whether all Rust targets build"
 run = "cargo check --all-targets"
@@ -70,7 +78,7 @@ run = "actionlint .github/workflows/*.yml"
 
 [tasks.check]
 description = """
-Run read-only build, formatting, lint, test, newline, typo, leak, and GitHub Actions checks"""
+Run read-only build, documentation, formatting, lint, test, newline, typo, leak, and GitHub Actions checks"""
 run = [
   { tasks = ["build:check", "newline:check", "typos:check"] },
   { task = "leaks:check" },

@@ -1,6 +1,6 @@
 use std::io::Write;
 
-use clap::{ArgAction, Args, CommandFactory, ValueEnum};
+use clap::{ArgAction, Args, ValueEnum};
 use eyre::OptionExt;
 
 #[derive(Args, Clone, Debug)]
@@ -25,7 +25,7 @@ impl CompletionCommand {
     pub fn run(self) {
         use clap_complete::Shell as CCShell;
         use Shell::*;
-        let mut cmd = crate::App::command();
+        let mut cmd = crate::cli_command();
         let app_name = self.bin_name.as_deref().unwrap_or("fj");
         let mut writer = std::io::stdout();
         match self.shell {

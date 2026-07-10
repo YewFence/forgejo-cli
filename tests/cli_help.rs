@@ -1,49 +1,33 @@
-use assert_cmd::Command;
-use rstest::rstest;
-
-fn fj() -> Command {
-    Command::cargo_bin("fj").unwrap()
-}
-
-/// Normalize platform-specific binary name so snapshots are portable.
-fn normalize_bin_name(s: &str) -> String {
-    s.replace("fj.exe", "fj")
+#[test]
+fn cli_definition_is_valid() {
+    let command = forgejo_cli_plus::cli_command();
+    assert_eq!(command.get_name(), "fj");
+    command.debug_assert();
 }
 
 #[test]
-fn help_top_level() {
-    let output = fj().arg("--help").output().unwrap();
-    let stdout = normalize_bin_name(&String::from_utf8_lossy(&output.stdout));
-    insta::assert_snapshot!("help_top_level", stdout);
+fn every_command_renders_long_help() {
+    let mut command = forgejo_cli_plus::cli_command();
+    let mut path = vec![command.get_name().to_owned()];
+    assert_help_renders(&mut command, &mut path);
 }
 
-#[rstest]
-#[case("repo")]
-#[case("issue")]
-#[case("pr")]
-#[case("tag")]
-#[case("release")]
-#[case("milestone")]
-#[case("org")]
-#[case("user")]
-#[case("actions")]
-#[case("auth")]
-#[case("wiki")]
-#[case("version")]
-fn help_subcommand(#[case] cmd: &str) {
-    let output = fj().args([cmd, "--help"]).output().unwrap();
-    let stdout = normalize_bin_name(&String::from_utf8_lossy(&output.stdout));
-    insta::assert_snapshot!(format!("help_{cmd}"), stdout);
-}
+fn assert_help_renders(command: &mut clap::Command, path: &mut Vec<String>) {
+    let command_path = path.join(" ");
+    let mut output = Vec::new();
+    command
+        .write_long_help(&mut output)
+        .unwrap_or_else(|error| panic!("failed to render help for `{command_path}`: {error}"));
+    let output = String::from_utf8(output)
+        .unwrap_or_else(|error| panic!("help for `{command_path}` is not UTF-8: {error}"));
+    assert!(
+        !output.trim().is_empty(),
+        "rendered empty help for `{command_path}`"
+    );
 
-#[rstest]
-#[case("repo migrate")]
-#[case("actions run")]
-#[case("actions artifact")]
-fn help_nested_subcommand(#[case] cmd: &str) {
-    let mut args: Vec<&str> = cmd.split(' ').collect();
-    args.push("--help");
-    let output = fj().args(&args).output().unwrap();
-    let stdout = normalize_bin_name(&String::from_utf8_lossy(&output.stdout));
-    insta::assert_snapshot!(format!("help_{}", cmd.replace(' ', "_")), stdout);
+    for subcommand in command.get_subcommands_mut() {
+        path.push(subcommand.get_name().to_owned());
+        assert_help_renders(subcommand, path);
+        path.pop();
+    }
 }
