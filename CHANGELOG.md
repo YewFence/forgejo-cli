@@ -1,4 +1,14 @@
 ## What's Changed in 2.2.0
+* chore: release v2.2.0 by @github-actions[bot] in [#1](https://github.com/YewFence/forgejo-cli/pull/1)
+* use native runners for cross-compiled targets by @YewFence
+* enable native TLS certificate roots for forgejo-api by @YewFence
+
+### New Contributors
+* @github-actions[bot] made their first contribution in [#1](https://github.com/YewFence/forgejo-cli/pull/1)
+
+**Full Changelog**: https://github.com/YewFence/forgejo-cli/compare/v2.1.0...v2.2.0
+
+## What's Changed in 2.2.0
 * use native runners for cross-compiled targets by @YewFence
 * enable native TLS certificate roots for forgejo-api by @YewFence
 
