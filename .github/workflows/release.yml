@@ -221,12 +221,10 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             platform: linux-x86_64
-          - os: ubuntu-latest
+          - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             platform: linux-aarch64
-            packages: gcc-aarch64-linux-gnu
-            linker_env: CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
-          - os: macos-latest
+          - os: macos-15-intel
             target: x86_64-apple-darwin
             platform: macos-x86_64
           - os: macos-latest
@@ -263,21 +261,6 @@ jobs:
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           key: ${{ matrix.target }}
-
-      - name: Install cross compiler
-        if: ${{ matrix.packages }}
-        env:
-          PACKAGES: ${{ matrix.packages }}
-        run: |
-          read -r -a packages <<< "${PACKAGES}"
-          sudo apt-get update
-          sudo apt-get install -y "${packages[@]}"
-
-      - name: Configure linker
-        if: ${{ matrix.linker_env }}
-        env:
-          LINKER_ENV: ${{ matrix.linker_env }}
-        run: echo "${LINKER_ENV}" >> "${GITHUB_ENV}"
 
       - name: Package release binary
         run: mise run release:package
