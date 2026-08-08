@@ -1,16 +1,16 @@
 use clap::{Args, Subcommand};
-use eyre::{bail, eyre, OptionExt};
+use eyre::{OptionExt, bail, eyre};
 use forgejo_api::{
-    structs::{RepoCreateReleaseAttachmentQuery, RepoListReleasesQuery},
     Forgejo,
+    structs::{RepoCreateReleaseAttachmentQuery, RepoListReleasesQuery},
 };
 use futures::stream::TryStreamExt;
 use tokio::io::AsyncWriteExt;
 
 use crate::{
+    SpecialRender,
     keys::KeyInfo,
     repo::{RepoArg, RepoInfo, RepoName},
-    SpecialRender,
 };
 
 #[derive(Args, Clone, Debug)]

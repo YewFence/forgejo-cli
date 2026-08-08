@@ -1,6 +1,6 @@
 use assert_cmd::Command;
-use wiremock::matchers::{method, path};
 use wiremock::MockServer;
+use wiremock::matchers::{method, path};
 use wiremock::{Mock, ResponseTemplate};
 
 /// A test Forgejo instance backed by wiremock.

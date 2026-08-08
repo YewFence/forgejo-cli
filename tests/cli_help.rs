@@ -1,13 +1,13 @@
 #[test]
 fn cli_definition_is_valid() {
-    let command = forgejo_cli_plus::cli_command();
+    let command = forgejo_cli::cli_command();
     assert_eq!(command.get_name(), "fj");
     command.debug_assert();
 }
 
 #[test]
 fn every_command_renders_long_help() {
-    let mut command = forgejo_cli_plus::cli_command();
+    let mut command = forgejo_cli::cli_command();
     let mut path = vec![command.get_name().to_owned()];
     assert_help_renders(&mut command, &mut path);
 }

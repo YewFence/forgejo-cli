@@ -5,18 +5,18 @@ use std::{io::Write, str::FromStr};
 use clap::{Args, Subcommand};
 use eyre::{Context, OptionExt};
 use forgejo_api::{
+    Forgejo,
     structs::{
         CreatePullRequestOption, MergePullRequestOption, PullReview, PullReviewComment,
         RepoGetPullRequestCommitsQuery, RepoGetPullRequestFilesQuery, StateType,
     },
-    Forgejo,
 };
 use futures::stream::{StreamExt, TryStreamExt};
 
 use crate::{
+    SpecialRender,
     issues::IssueId,
     repo::{RepoArg, RepoInfo, RepoName},
-    SpecialRender,
 };
 
 #[derive(Args, Clone, Debug)]
@@ -620,7 +620,9 @@ impl PrCommand {
             }
             Checkout { .. } => {
                 if git2::Repository::discover(".").is_ok() {
-                    eyre::eyre!("can't figure out what repo to access, try setting a remote tracking branch")
+                    eyre::eyre!(
+                        "can't figure out what repo to access, try setting a remote tracking branch"
+                    )
                 } else {
                     eyre::eyre!("pr checkout only works if the current directory is a git repo")
                 }
@@ -639,10 +641,10 @@ impl PrCommand {
                 Some(pr) => eyre::eyre!(
                     "can't figure out what repo to access, try specifying with `--repo` or `{{owner}}/{{repo}}#{}`",
                     pr.number
-                    ),
+                ),
                 None => eyre::eyre!(
                     "can't figure out what repo to access, try specifying with `--repo` or `{{owner}}/{{repo}}#{{pr}}`",
-                    ),
+                ),
             },
         }
     }
@@ -756,10 +758,10 @@ pub async fn view_pr(repo: &RepoName, api: &Forgejo, id: Option<i64>) -> eyre::R
             println!("From `{head_name}` into `{base_name}`");
         }
 
-        if let Some(ms) = &pr.milestone {
-            if let Some(title) = ms.title.as_deref() {
-                println!("Milestone: {title}");
-            }
+        if let Some(ms) = &pr.milestone
+            && let Some(title) = ms.title.as_deref()
+        {
+            println!("Milestone: {title}");
         }
 
         if let Some(assignees) = &pr.assignees {
@@ -774,11 +776,11 @@ pub async fn view_pr(repo: &RepoName, api: &Forgejo, id: Option<i64>) -> eyre::R
 
         crate::render_label_list(pr.labels.as_deref().unwrap_or_default())?;
 
-        if let Some(body) = &pr.body {
-            if !body.trim().is_empty() {
-                println!();
-                println!("{}", crate::markdown(body));
-            }
+        if let Some(body) = &pr.body
+            && !body.trim().is_empty()
+        {
+            println!();
+            println!("{}", crate::markdown(body));
         }
         println!();
 
@@ -1064,10 +1066,10 @@ fn print_pr_review(review: &PullReview) -> eyre::Result<()> {
 
     println!("{reset}");
 
-    if let Some(body) = &review.body {
-        if !body.trim().is_empty() {
-            println!("{}", crate::markdown(body));
-        }
+    if let Some(body) = &review.body
+        && !body.trim().is_empty()
+    {
+        println!("{}", crate::markdown(body));
     }
 
     Ok(())
@@ -1604,7 +1606,9 @@ async fn create_pr(
                                 let crate::SpecialRender { bold, reset, .. } =
                                     crate::special_render();
                                 println!("{bold}Note:{reset}");
-                                println!("  `git push --force[-with-lease]` is not supported for AGit PRs.");
+                                println!(
+                                    "  `git push --force[-with-lease]` is not supported for AGit PRs."
+                                );
                                 println!("  You can use `git push -o force=true` instead.");
                                 break;
                             }
@@ -2058,7 +2062,9 @@ async fn view_pr_files(repo: &RepoName, api: &Forgejo, pr: Option<i64>) -> eyre:
         let name = file.filename.as_deref().unwrap_or("???");
         let additions = file.additions.unwrap_or_default();
         let deletions = file.deletions.unwrap_or_default();
-        println!("{bright_green}+{additions:<additions_width$} {bright_red}-{deletions:<deletions_width$}{reset} {name}");
+        println!(
+            "{bright_green}+{additions:<additions_width$} {bright_red}-{deletions:<deletions_width$}{reset} {name}"
+        );
     }
     Ok(())
 }
@@ -2127,7 +2133,9 @@ async fn view_pr_commits(
         let deletions = stats.deletions.unwrap_or_default();
 
         if oneline {
-            println!("{yellow}{short_sha} {bright_green}+{additions:<additions_width$} {bright_red}-{deletions:<deletions_width$}{reset} {name}");
+            println!(
+                "{yellow}{short_sha} {bright_green}+{additions:<additions_width$} {bright_red}-{deletions:<deletions_width$}{reset} {name}"
+            );
         } else {
             let author = repo_commit
                 .author
@@ -2140,10 +2148,14 @@ async fn view_pr_commits(
                 .as_ref()
                 .ok_or_eyre("commit as no creation date")?;
 
-            println!("{yellow}commit {sha}{reset} ({bright_green}+{additions}{reset}, {bright_red}-{deletions}{reset})");
+            println!(
+                "{yellow}commit {sha}{reset} ({bright_green}+{additions}{reset}, {bright_red}-{deletions}{reset})"
+            );
             println!("Author: {author_name} <{author_email}>");
             print!("Date:   ");
-            let format = time::macros::format_description!("[weekday repr:short] [month repr:short] [day] [hour repr:24]:[minute]:[second] [year] [offset_hour sign:mandatory][offset_minute]");
+            let format = time::macros::format_description!(
+                "[weekday repr:short] [month repr:short] [day] [hour repr:24]:[minute]:[second] [year] [offset_hour sign:mandatory][offset_minute]"
+            );
             date.format_into(&mut std::io::stdout().lock(), format)?;
             println!();
             println!();

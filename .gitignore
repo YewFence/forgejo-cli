@@ -1,8 +1,7 @@
 /target
 /dist
-
-# Nix output
-/result*
+/docs/node_modules
+/docs/.vitepress/dist
 
 # Internal context
 FORK_CONTEXT.md

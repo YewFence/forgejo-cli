@@ -3,7 +3,7 @@ use std::io::IsTerminal;
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
-use eyre::{eyre, Context, OptionExt};
+use eyre::{Context, OptionExt, eyre};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 mod keys;
@@ -340,23 +340,23 @@ fn ssh_url_parse_with(
             url::Url::parse(&new_s)?
         }
     };
-    if url.scheme() == "ssh" {
-        if let (Some(config), Some(host_str)) = (config, url.host_str().map(str::to_owned)) {
-            let host_params = config.query(&host_str);
-            if let Some(host_name) = host_params.host_name {
-                // Expand '%h' and '%%' per ssh_config(5)
-                let expanded = host_name.replace("%h", &host_str).replace("%%", "%");
-                // An IP-literal HostName redirects the ssh transport (common
-                // with gateways like Cloudron); the domain in the remote is
-                // still the forge's identity for API URLs and saved logins.
-                let is_ip_literal = expanded
-                    .trim_start_matches('[')
-                    .trim_end_matches(']')
-                    .parse::<std::net::IpAddr>()
-                    .is_ok();
-                if !is_ip_literal {
-                    url.set_host(Some(&expanded))?;
-                }
+    if url.scheme() == "ssh"
+        && let (Some(config), Some(host_str)) = (config, url.host_str().map(str::to_owned))
+    {
+        let host_params = config.query(&host_str);
+        if let Some(host_name) = host_params.host_name {
+            // Expand '%h' and '%%' per ssh_config(5)
+            let expanded = host_name.replace("%h", &host_str).replace("%%", "%");
+            // An IP-literal HostName redirects the ssh transport (common
+            // with gateways like Cloudron); the domain in the remote is
+            // still the forge's identity for API URLs and saved logins.
+            let is_ip_literal = expanded
+                .trim_start_matches('[')
+                .trim_end_matches(']')
+                .parse::<std::net::IpAddr>()
+                .is_ok();
+            if !is_ip_literal {
+                url.set_host(Some(&expanded))?;
             }
         }
     }
@@ -650,8 +650,8 @@ fn markdown(text: &str) -> String {
     ansi_printer.resume_style();
     let mut iter = render_queue.into_iter().peekable();
     while let Some((item, side)) = iter.next() {
-        use comrak::nodes::NodeValue;
         use Side::*;
+        use comrak::nodes::NodeValue;
         match (&item.data.borrow().value, side) {
             (NodeValue::Paragraph, Start) => (),
             (NodeValue::Paragraph, End) => {

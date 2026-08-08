@@ -2,7 +2,7 @@ use clap::{Args, Subcommand};
 use eyre::{Context, ContextCompat, OptionExt};
 use forgejo_api::Forgejo;
 
-use crate::{repo::RepoInfo, SpecialRender};
+use crate::{SpecialRender, repo::RepoInfo};
 
 #[derive(Args, Clone, Debug)]
 pub struct UserCommand {
@@ -414,40 +414,41 @@ async fn view_user(api: &Forgejo, user: Option<&str>) -> eyre::Result<()> {
             .as_deref()
             .ok_or_eyre("user has no username")?;
         print!("{bright_cyan}{bold}{username}{reset}");
-        if let Some(pronouns) = user_data.pronouns.as_deref() {
-            if !pronouns.is_empty() {
-                print!("{light_grey} {dash} {bold}{pronouns}{reset}");
-            }
+        if let Some(pronouns) = user_data.pronouns.as_deref()
+            && !pronouns.is_empty()
+        {
+            print!("{light_grey} {dash} {bold}{pronouns}{reset}");
         }
         println!();
         let followers = user_data.followers_count.unwrap_or_default();
         let following = user_data.following_count.unwrap_or_default();
         println!("{bold}{followers}{reset} followers {dash} {bold}{following}{reset} following");
         let mut first = true;
-        if let Some(website) = user_data.website.as_deref() {
-            if !website.is_empty() {
-                print!("{bold}{website}{reset}");
-                first = false;
-            }
+        if let Some(website) = user_data.website.as_deref()
+            && !website.is_empty()
+        {
+            print!("{bold}{website}{reset}");
+            first = false;
         }
-        if let Some(email) = user_data.email.as_deref() {
-            if !email.is_empty() && !email.contains("noreply") {
-                if !first {
-                    print!(" {dash} ");
-                }
-                print!("{bold}{email}{reset}");
+        if let Some(email) = user_data.email.as_deref()
+            && !email.is_empty()
+            && !email.contains("noreply")
+        {
+            if !first {
+                print!(" {dash} ");
             }
+            print!("{bold}{email}{reset}");
         }
         if !first {
             println!();
         }
 
-        if let Some(desc) = user_data.description.as_deref() {
-            if !desc.is_empty() {
-                println!();
-                println!("{}", crate::markdown(desc));
-                println!();
-            }
+        if let Some(desc) = user_data.description.as_deref()
+            && !desc.is_empty()
+        {
+            println!();
+            println!("{}", crate::markdown(desc));
+            println!();
         }
 
         let joined = user_data
@@ -754,7 +755,9 @@ pub fn print_activity(activity: &forgejo_api::structs::Activity) -> eyre::Result
             let full_name = repo_name(repo)?;
             if let Some(parent) = &repo.parent {
                 let parent_full_name = repo_name(parent)?;
-                println!("{bold}{actor_name}{reset} forked repository {bold}{yellow}{parent_full_name}{reset} to {bold}{yellow}{full_name}{reset}");
+                println!(
+                    "{bold}{actor_name}{reset} forked repository {bold}{yellow}{parent_full_name}{reset} to {bold}{yellow}{full_name}{reset}"
+                );
             } else if repo.mirror.is_some_and(|b| b) {
                 println!(
                     "{bold}{actor_name}{reset} created mirror {bold}{yellow}{full_name}{reset}"
@@ -768,7 +771,9 @@ pub fn print_activity(activity: &forgejo_api::structs::Activity) -> eyre::Result
         ActivityOpType::RenameRepo => {
             let content = content?;
             let full_name = repo_name(repo?)?;
-            println!("{bold}{actor_name}{reset} renamed repository from {bold}{yellow}\"{content}\"{reset} to {bold}{yellow}{full_name}{reset}");
+            println!(
+                "{bold}{actor_name}{reset} renamed repository from {bold}{yellow}\"{content}\"{reset} to {bold}{yellow}{full_name}{reset}"
+            );
         }
         ActivityOpType::StarRepo => {
             let full_name = repo_name(repo?)?;
@@ -787,7 +792,9 @@ pub fn print_activity(activity: &forgejo_api::structs::Activity) -> eyre::Result
             let ref_name = ref_name?;
             let branch = ref_name.strip_prefix("refs/heads/").unwrap_or(ref_name);
             if !content?.is_empty() {
-                println!("{bold}{actor_name}{reset} pushed to {bold}{bright_cyan}{branch}{reset} on {bold}{yellow}{full_name}{reset}");
+                println!(
+                    "{bold}{actor_name}{reset} pushed to {bold}{bright_cyan}{branch}{reset} on {bold}{yellow}{full_name}{reset}"
+                );
             }
         }
         ActivityOpType::CreateIssue => {
@@ -803,13 +810,17 @@ pub fn print_activity(activity: &forgejo_api::structs::Activity) -> eyre::Result
         ActivityOpType::TransferRepo => {
             let full_name = repo_name(repo?)?;
             let content = content?;
-            println!("{bold}{actor_name}{reset} transferred repository {bold}{yellow}{content}{reset} to {bold}{yellow}{full_name}{reset}");
+            println!(
+                "{bold}{actor_name}{reset} transferred repository {bold}{yellow}{content}{reset} to {bold}{yellow}{full_name}{reset}"
+            );
         }
         ActivityOpType::PushTag => {
             let full_name = repo_name(repo?)?;
             let ref_name = ref_name?;
             let tag = ref_name.strip_prefix("refs/heads/").unwrap_or(ref_name);
-            println!("{bold}{actor_name}{reset} pushed tag {bold}{bright_cyan}{tag}{reset} to {bold}{yellow}{full_name}{reset}");
+            println!(
+                "{bold}{actor_name}{reset} pushed tag {bold}{bright_cyan}{tag}{reset} to {bold}{yellow}{full_name}{reset}"
+            );
         }
         ActivityOpType::CommentIssue => {
             let (name, id) = issue_name(repo?, content?)?;
@@ -847,13 +858,17 @@ pub fn print_activity(activity: &forgejo_api::structs::Activity) -> eyre::Result
             let full_name = repo_name(repo?)?;
             let ref_name = ref_name?;
             let tag = ref_name.strip_prefix("refs/heads/").unwrap_or(ref_name);
-            println!("{bold}{actor_name}{reset} deleted tag {bold}{bright_cyan}{tag}{reset} from {bold}{yellow}{full_name}{reset}");
+            println!(
+                "{bold}{actor_name}{reset} deleted tag {bold}{bright_cyan}{tag}{reset} from {bold}{yellow}{full_name}{reset}"
+            );
         }
         ActivityOpType::DeleteBranch => {
             let full_name = repo_name(repo?)?;
             let ref_name = ref_name?;
             let branch = ref_name.strip_prefix("refs/heads/").unwrap_or(ref_name);
-            println!("{bold}{actor_name}{reset} deleted branch {bold}{bright_cyan}{branch}{reset} from {bold}{yellow}{full_name}{reset}");
+            println!(
+                "{bold}{actor_name}{reset} deleted branch {bold}{bright_cyan}{branch}{reset} from {bold}{yellow}{full_name}{reset}"
+            );
         }
         ActivityOpType::MirrorSyncPush => {}
         ActivityOpType::MirrorSyncCreate => {}
@@ -870,12 +885,16 @@ pub fn print_activity(activity: &forgejo_api::structs::Activity) -> eyre::Result
         }
         ActivityOpType::CommentPull => {
             let (name, id) = issue_name(repo?, content?)?;
-            println!("{bold}{actor_name}{reset} commented on pull request {bold}{yellow}{name}#{id}{reset}");
+            println!(
+                "{bold}{actor_name}{reset} commented on pull request {bold}{yellow}{name}#{id}{reset}"
+            );
         }
         ActivityOpType::PublishRelease => {
             let full_name = repo_name(repo?)?;
             let content = content?;
-            println!("{bold}{actor_name}{reset} created release {bold}{bright_cyan}\"{content}\"{reset} to {bold}{yellow}{full_name}{reset}");
+            println!(
+                "{bold}{actor_name}{reset} created release {bold}{bright_cyan}\"{content}\"{reset} to {bold}{yellow}{full_name}{reset}"
+            );
         }
         ActivityOpType::PullReviewDismissed => {}
         ActivityOpType::PullRequestReadyForReview => {}
@@ -1414,8 +1433,7 @@ async fn delete_gpg(api: &Forgejo, id: i64, force: bool, dry_run: bool) -> eyre:
     }
 
     if !force && !crate::yes_mode() {
-        let prompt =
-            "Deleting a GPG key will cause all commits signed by that key to become unverified! Continue?";
+        let prompt = "Deleting a GPG key will cause all commits signed by that key to become unverified! Continue?";
         if !crate::prompt_bool(prompt, false).await? {
             crate::output::info("Not deleted");
             return Ok(());

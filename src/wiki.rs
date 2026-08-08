@@ -6,8 +6,8 @@ use eyre::{Context, OptionExt};
 use forgejo_api::Forgejo;
 
 use crate::{
-    repo::{RepoArg, RepoInfo, RepoName},
     SpecialRender,
+    repo::{RepoArg, RepoInfo, RepoName},
 };
 
 #[derive(Args, Clone, Debug)]

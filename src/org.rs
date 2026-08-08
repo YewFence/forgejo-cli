@@ -1,14 +1,14 @@
 use clap::{Args, Subcommand};
 use eyre::OptionExt;
 use forgejo_api::{
+    Forgejo,
     structs::{
         CreateLabelOption, CreateOrgOption, EditLabelOption, EditOrgOption, OrgListLabelsQuery,
     },
-    Forgejo,
 };
-use futures::{future, TryStreamExt};
+use futures::{TryStreamExt, future};
 
-use crate::{repo::RepoInfo, SpecialRender};
+use crate::{SpecialRender, repo::RepoInfo};
 
 mod team;
 
@@ -196,10 +196,11 @@ async fn list_orgs(api: &Forgejo, page: u32, only_member_of: bool) -> eyre::Resu
     crate::output::print_list(&orgs, &["NAME"], |org| {
         vec![org.name.as_deref().unwrap_or("?").to_string()]
     });
-    if let Some(total) = total {
-        if !orgs.is_empty() && !crate::json_mode() {
-            println!("Page {} of {}", page, total.div_ceil(20));
-        }
+    if let Some(total) = total
+        && !orgs.is_empty()
+        && !crate::json_mode()
+    {
+        println!("Page {} of {}", page, total.div_ceil(20));
     }
     Ok(())
 }
@@ -263,38 +264,38 @@ async fn view_org(api: &Forgejo, name: String) -> eyre::Result<()> {
         println!();
 
         let mut first = true;
-        if let Some(website) = &org.website {
-            if !website.is_empty() {
-                print!("{bold}{website}{reset}");
-                first = false;
-            }
+        if let Some(website) = &org.website
+            && !website.is_empty()
+        {
+            print!("{bold}{website}{reset}");
+            first = false;
         }
-        if let Some(email) = &org.email {
-            if !email.is_empty() {
-                if !first {
-                    print!(" {dash} ");
-                }
-                print!("{email}");
-                first = false;
+        if let Some(email) = &org.email
+            && !email.is_empty()
+        {
+            if !first {
+                print!(" {dash} ");
             }
+            print!("{email}");
+            first = false;
         }
-        if let Some(location) = &org.location {
-            if !location.is_empty() {
-                if !first {
-                    print!(" {dash} ");
-                }
-                print!("{location}");
-                first = false;
+        if let Some(location) = &org.location
+            && !location.is_empty()
+        {
+            if !first {
+                print!(" {dash} ");
             }
+            print!("{location}");
+            first = false;
         }
         if !first {
             println!();
         }
 
-        if let Some(description) = &org.description {
-            if !description.is_empty() {
-                println!("\n{}\n", crate::markdown(description));
-            }
+        if let Some(description) = &org.description
+            && !description.is_empty()
+        {
+            println!("\n{}\n", crate::markdown(description));
         }
 
         Ok(())
@@ -305,27 +306,35 @@ async fn view_org(api: &Forgejo, name: String) -> eyre::Result<()> {
 
 async fn create_org(api: &Forgejo, name: String, options: OrgOptions) -> eyre::Result<()> {
     if !name.chars().all(is_valid_name_char) {
-        eyre::bail!("Organization names can only have alphanumeric characters, dashes, underscores, or periods. \n  If you want a name with other characters, try setting the --full-name flag");
+        eyre::bail!(
+            "Organization names can only have alphanumeric characters, dashes, underscores, or periods. \n  If you want a name with other characters, try setting the --full-name flag"
+        );
     }
     if !name
         .chars()
         .next()
         .is_some_and(|c| c.is_ascii_alphanumeric())
     {
-        eyre::bail!("Organization names can only start with alphanumeric characters. \n  If you want a name that starts with other characters, try setting the --full-name flag");
+        eyre::bail!(
+            "Organization names can only start with alphanumeric characters. \n  If you want a name that starts with other characters, try setting the --full-name flag"
+        );
     }
     if !name
         .chars()
         .last()
         .is_some_and(|c| c.is_ascii_alphanumeric())
     {
-        eyre::bail!("Organization names can only end with alphanumeric characters. \n  If you want a name that ends with other characters, try setting the --full-name flag");
+        eyre::bail!(
+            "Organization names can only end with alphanumeric characters. \n  If you want a name that ends with other characters, try setting the --full-name flag"
+        );
     }
     let mut chars = name.chars().peekable();
     while let Some(c) = chars.next() {
         // because of the prior check, if it isn't alphanumeric, it's definitely one of - _ or .
         if !c.is_alphanumeric() && !chars.peek().is_some_and(|c| c.is_alphanumeric()) {
-            eyre::bail!("Organization names can't have consecutive non-alphanumeric characters.\n  If you want that in the name, try setting the --full-name flag");
+            eyre::bail!(
+                "Organization names can't have consecutive non-alphanumeric characters.\n  If you want that in the name, try setting the --full-name flag"
+            );
         }
     }
     let opt = CreateOrgOption {

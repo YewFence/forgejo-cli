@@ -1,4 +1,4 @@
-# forgejo-cli-plus
+# forgejo-cli
 
 Community-maintained fork of [forgejo-cli](https://codeberg.org/forgejo-contrib/forgejo-cli).
 
@@ -19,7 +19,7 @@ Binary name is `fj` (set in Cargo.toml `[[bin]]`).
 - **`SpecialRender` is a global singleton** -- access via `crate::special_render()`. Never construct raw ANSI codes.
 - **New subcommands should take `--repo`/`-r`** (`repo: Option<RepoArg>`) like the existing ones; the historical `--repo` inconsistency was fixed in #47 and later syncs.
 - **forgejo-api is vendored and patched** (`vendor/forgejo-api` via `[patch.crates-io]`): stock 0.11.0 rejects responses from pre-v16 servers (`Organization.created`, `PublicKey.updated_at`, and team-embedded orgs in PR responses omit presence-required keys). See `vendor/forgejo-api/PATCHES.md` before touching the dependency.
-- **`forgejo_cli_plus::run()` runs the runtime on a 16 MiB thread** (`async_main`): debug-build futures embedding forgejo-api structs overflow the default 1 MiB Windows main-thread stack. Keep `src/main.rs` as the thin entry point; don't move `#[tokio::main]` back onto the system main thread.
+- **`forgejo_cli::run()` runs the runtime on a 16 MiB thread** (`async_main`): debug-build futures embedding forgejo-api structs overflow the default 1 MiB Windows main-thread stack. Keep `src/main.rs` as the thin entry point; don't move `#[tokio::main]` back onto the system main thread.
 - **`keys.save()` is per-mutation**, not on exit -- every code path that mutates `KeyInfo` must call `keys.save().await?` itself.
 
 ## Adding a new command

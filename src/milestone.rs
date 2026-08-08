@@ -1,10 +1,10 @@
 use clap::{Args, Subcommand};
 use eyre::OptionExt;
+use forgejo_api::Forgejo;
 use forgejo_api::structs::{
     CreateMilestoneOption, EditMilestoneOption, IssueGetMilestonesListQuery, Milestone,
 };
-use forgejo_api::Forgejo;
-use futures::{future, TryStreamExt};
+use futures::{TryStreamExt, future};
 
 use crate::{
     keys::KeyInfo,
@@ -115,11 +115,11 @@ pub async fn find_milestone(
     name_or_id: &str,
 ) -> eyre::Result<Milestone> {
     // Try numeric ID first
-    if let Ok(id) = name_or_id.parse::<i64>() {
-        if let Ok(ms) = api.issue_get_milestone(repo.owner(), repo.name(), id).await {
-            crate::verbose_log!("Resolved milestone '{}' by numeric ID", name_or_id);
-            return Ok(ms);
-        }
+    if let Ok(id) = name_or_id.parse::<i64>()
+        && let Ok(ms) = api.issue_get_milestone(repo.owner(), repo.name(), id).await
+    {
+        crate::verbose_log!("Resolved milestone '{}' by numeric ID", name_or_id);
+        return Ok(ms);
     }
 
     // Fall back to name search (server-side filter, exact match verified client-side)
@@ -219,11 +219,11 @@ async fn view_milestone(repo: &RepoName, api: &Forgejo, name_or_id: &str) -> eyr
             println!("Due: {bold}{due_str}{reset}");
         }
 
-        if let Some(desc) = &ms.description {
-            if !desc.is_empty() {
-                println!();
-                println!("{}", crate::markdown(desc));
-            }
+        if let Some(desc) = &ms.description
+            && !desc.is_empty()
+        {
+            println!();
+            println!("{}", crate::markdown(desc));
         }
 
         Ok(())

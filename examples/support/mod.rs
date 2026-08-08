@@ -1,5 +1,5 @@
 pub fn generate_cli_reference() -> String {
-    let markdown = clap_markdown::help_markdown_command(&forgejo_cli_plus::cli_command());
+    let markdown = clap_markdown::help_markdown_command(&forgejo_cli::cli_command());
     let mut normalized = String::with_capacity(markdown.len());
 
     for line in markdown.lines() {

@@ -1,10 +1,17 @@
 [settings]
 lockfile = true
+env_shell_expand = true
 minimum_release_age = "3d"
 
 [tools]
 # https://www.rust-lang.org/
-rust = { version = "stable", components = "rustfmt,clippy" }
+rust = { version = "1.97.1", components = "rustfmt,clippy" }
+# https://nodejs.org/
+node = "26"
+# https://github.com/jdx/aube
+aube = "1"
+# https://github.com/jdx/hk
+hk = "1"
 # https://github.com/suzuki-shunsuke/nllint
 "go:github.com/suzuki-shunsuke/nllint/cmd/nllint" = "1"
 # https://github.com/suzuki-shunsuke/pinact
@@ -18,10 +25,27 @@ actionlint = "1"
 
 [vars]
 nllint_excludes = "':(top,exclude)LICENSE-APACHE' ':(top,exclude)vendor/forgejo-api/LICENSE-APACHE'"
+rust_binary_name = "fj"
+
+[env]
+PINACT_MIN_AGE = "3"
+PINACT_GITHUB_TOKEN = { value = "${MISE_GITHUB_TOKEN:-}", redact = true }
+
+[tasks."deps:check"]
+description = "Check Cargo dependency metadata and the lockfile"
+run = "cargo metadata --locked --format-version 1 >/dev/null"
+
+[tasks."deps:fix"]
+description = "Regenerate the Cargo lockfile"
+run = "cargo generate-lockfile"
+
+[tasks."deps:update"]
+description = "Update Cargo dependencies"
+run = "cargo update"
 
 [tasks.test]
-description = "Run all Rust tests"
-run = "cargo test --all-targets"
+description = "Run all Rust tests and feature combinations"
+run = "cargo test --workspace --all-targets --all-features --locked"
 
 [tasks."docs:generate"]
 description = "Generate the Markdown CLI reference from the Clap schema"
@@ -32,20 +56,24 @@ description = "Check that the generated Markdown CLI reference is current"
 run = "cargo test --test cli_docs"
 
 [tasks."build:check"]
-description = "Check whether all Rust targets build"
-run = "cargo check --all-targets"
+description = "Check all Rust targets and features"
+run = "cargo check --workspace --all-targets --all-features --locked"
+
+[tasks.build]
+description = "Build an optimized Rust binary"
+run = "cargo build --workspace --all-features --release --locked"
 
 [tasks."fmt:check"]
 description = "Check Rust code formatting"
-run = "cargo fmt -- --check"
+run = "cargo fmt --all -- --check"
 
 [tasks."fmt:fix"]
 description = "Fix Rust code formatting"
-run = "cargo fmt"
+run = "cargo fmt --all"
 
 [tasks.lint]
 description = "Run Clippy with warnings denied"
-run = "cargo clippy --all-targets -- -D warnings"
+run = "cargo clippy --workspace --all-targets --all-features --locked -- -D warnings"
 
 [tasks."leaks:check"]
 description = "Run betterleaks checks"
@@ -67,33 +95,89 @@ run = "git grep -Ilz '' -- . {{ vars.nllint_excludes }} | xargs -0 nllint --trim
 description = "Fix final newlines and surrounding whitespace in tracked text files"
 run = "git grep -Ilz '' -- . {{ vars.nllint_excludes }} | xargs -0 nllint --fix --trim-space"
 
-[tasks."actions:pin-offline:check"]
-description = "Check that GitHub Actions are pinned to commit hashes"
-run = "pinact run --fix=false --no-api .github/workflows/*.yml"
-
-[tasks."actions:check"]
-description = "Lint GitHub Actions workflows"
-depends = ["actions:pin-offline:check"]
-run = "actionlint .github/workflows/*.yml"
-
 [tasks.check]
-description = """
-Run read-only build, documentation, formatting, lint, test, newline, typo, leak, and GitHub Actions checks"""
+description = "Run read-only project and repository checks"
 run = [
-  { tasks = ["build:check", "newline:check", "typos:check"] },
-  { task = "leaks:check" },
-  { task = "actions:check" },
-  { task = "fmt:check" },
-  { task = "lint" },
-  { task = "test" },
+  { task = "repo:check" },
+  { task = "rust:check" },
+  { task = "test" }
 ]
 alias = "c"
 
-[tasks.fix]
-description = "Fix formatting, newlines, and typos"
+[tasks."repo:check"]
+description = "Run language-neutral repository checks"
 run = [
+  { task = "deps:check" },
+  { task = "newline:check" },
+  { task = "typos:check" },
+  { task = "leaks:check" },
+  { task = "actions:check" }
+]
+
+[tasks."rust:check"]
+description = "Run Rust formatting, compilation, and lint checks"
+run = [
+  { task = "fmt:check" },
+  { task = "build:check" },
+  { task = "lint" }
+]
+
+[tasks.fix]
+description = "Fix project and repository formatting"
+run = [
+  { task = "deps:fix" },
   { task = "newline:fix" },
   { task = "typos:fix" },
-  { task = "fmt:fix" },
+  { task = "fmt:fix" }
 ]
 alias = "f"
+
+[tasks.'hooks:install']
+description = "Install Git hooks managed by hk"
+run = "hk install"
+
+[tasks."actions:check"]
+description = "Run actionlint"
+depends = ["actions:pin-offline:check"]
+run = "actionlint .github/workflows/*.yml"
+
+[tasks.'actions:update']
+description = "Update GitHub Action versions and pin to commit hashes"
+run = "pinact run --update"
+
+[tasks.'actions:pin-offline:check']
+description = "Check GitHub Action versions and pin to commit hashes"
+run = "unset PINACT_MIN_AGE && pinact run --fix=false --no-api"
+
+[tasks.'docs:install']
+description = "Install documentation site dependencies"
+dir = "docs"
+run = "aube install"
+
+[tasks.'docs:lock']
+description = "Generate the documentation lockfile without installing dependencies"
+dir = "docs"
+run = "aube install --lockfile-only"
+
+[tasks.'docs:install:locked']
+description = "Install documentation dependencies from the committed lockfile"
+dir = "docs"
+run = "aube ci"
+
+[tasks.'docs:dev']
+description = "Start the VitePress documentation site"
+depends = ["docs:install:locked"]
+dir = "docs"
+run = "aube run dev"
+
+[tasks.'docs:build']
+description = "Build the VitePress documentation site"
+depends = ["docs:install:locked"]
+dir = "docs"
+run = "aube run build"
+
+[tasks.'docs:preview']
+description = "Preview the VitePress documentation site"
+depends = ["docs:install:locked"]
+dir = "docs"
+run = "aube run preview"

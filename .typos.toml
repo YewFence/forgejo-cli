@@ -5,3 +5,8 @@ commiter = "commiter"
 [default.extend-words]
 # Commit SHA fragment in an integration-test regression comment.
 dbe = "dbe"
+# Package name recorded in the generated aube lockfile.
+devlop = "devlop"
+
+[type.svg]
+check-file = false

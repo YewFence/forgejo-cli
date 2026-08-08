@@ -3,7 +3,7 @@ name: forgejo-cli
 description: Use when interacting with Forgejo or Gitea instances - creating issues, pull requests, managing repos, releases, milestones, orgs, users, CI/CD actions, or any git forge operation via the fj CLI
 ---
 
-# forgejo-cli-plus (`fj`)
+# forgejo-cli (`fj`)
 
 CLI for Forgejo/Gitea instances. Binary name: `fj`.
 

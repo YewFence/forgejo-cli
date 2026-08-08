@@ -1,8 +1,8 @@
 use std::{io::Write, path::PathBuf, str::FromStr};
 
 use clap::{Args, Subcommand};
-use eyre::{eyre, Context, OptionExt, Result};
-use forgejo_api::{structs::CreateRepoOption, Forgejo};
+use eyre::{Context, OptionExt, Result, eyre};
+use forgejo_api::{Forgejo, structs::CreateRepoOption};
 use url::Url;
 
 use crate::{DisplayOptional, SpecialRender};
@@ -84,10 +84,10 @@ impl RepoInfo {
                 // if there's only one remote, use that
                 if name.is_none() {
                     let all_remotes = local_repo.remotes()?;
-                    if all_remotes.len() == 1 {
-                        if let Ok(Some(remote_name)) = all_remotes.get(0) {
-                            name = Some(remote_name.to_owned());
-                        }
+                    if all_remotes.len() == 1
+                        && let Ok(Some(remote_name)) = all_remotes.get(0)
+                    {
+                        name = Some(remote_name.to_owned());
                     }
                 }
 
@@ -120,25 +120,25 @@ impl RepoInfo {
                 //
                 // This is different than using `--host` itself, since this
                 // will include the repo name, which `--host` can't do.
-                if name.is_none() {
-                    if let Some(host_url) = &host_url {
-                        let all_remotes = local_repo.remotes()?;
-                        for remote_name in all_remotes.iter() {
-                            let Ok(Some(remote_name)) = remote_name else {
-                                continue;
-                            };
-                            let remote = local_repo.find_remote(remote_name)?;
+                if name.is_none()
+                    && let Some(host_url) = &host_url
+                {
+                    let all_remotes = local_repo.remotes()?;
+                    for remote_name in all_remotes.iter() {
+                        let Ok(Some(remote_name)) = remote_name else {
+                            continue;
+                        };
+                        let remote = local_repo.find_remote(remote_name)?;
 
-                            if let Ok(url) = remote.url() {
-                                let url = crate::ssh_url_parse(url)?;
-                                let (url, _) = url_strip_repo_name(url)?;
-                                let url = keys.deref_alias(url);
-                                if crate::host_name(&url) == crate::host_name(host_url)
-                                    && url.path() == host_url.path()
-                                {
-                                    name = Some(remote_name.to_owned());
-                                    break;
-                                }
+                        if let Ok(url) = remote.url() {
+                            let url = crate::ssh_url_parse(url)?;
+                            let (url, _) = url_strip_repo_name(url)?;
+                            let url = keys.deref_alias(url);
+                            if crate::host_name(&url) == crate::host_name(host_url)
+                                && url.path() == host_url.path()
+                            {
+                                name = Some(remote_name.to_owned());
+                                break;
                             }
                         }
                     }
@@ -155,17 +155,17 @@ impl RepoInfo {
                     }
                 }
 
-                if let Some(name) = name {
-                    if let Ok(remote) = local_repo.find_remote(&name) {
-                        let url_s = std::str::from_utf8(remote.url_bytes())?;
-                        let url = crate::ssh_url_parse(url_s)?;
-                        let (url, repo_name) = url_strip_repo_name(url)?;
-                        let url = keys.deref_alias(url);
+                if let Some(name) = name
+                    && let Ok(remote) = local_repo.find_remote(&name)
+                {
+                    let url_s = std::str::from_utf8(remote.url_bytes())?;
+                    let url = crate::ssh_url_parse(url_s)?;
+                    let (url, repo_name) = url_strip_repo_name(url)?;
+                    let url = keys.deref_alias(url);
 
-                        out = (Some(url), Some(repo_name));
+                    out = (Some(url), Some(repo_name));
 
-                        final_remote_name = Some(name);
-                    }
+                    final_remote_name = Some(name);
                 }
             } else {
                 eyre::ensure!(remote.is_none(), "remote specified but no git repo found");
@@ -646,13 +646,13 @@ impl RepoCommand {
                         .strip_prefix("https://")
                         .or_else(|| s.strip_prefix("http://"))
                         .unwrap_or(s);
-                    let no_trailing_slash = no_scheme.strip_suffix("/").unwrap_or(no_scheme);
-                    no_trailing_slash
+
+                    (no_scheme.strip_suffix("/").unwrap_or(no_scheme)) as _
                 }
-                if let (Some(a), Some(b)) = (repo.host.as_deref(), host_name) {
-                    if strip(a) != strip(b) {
-                        eyre::bail!("conflicting hosts {a} and {b}. please only specify one");
-                    }
+                if let (Some(a), Some(b)) = (repo.host.as_deref(), host_name)
+                    && strip(a) != strip(b)
+                {
+                    eyre::bail!("conflicting hosts {a} and {b}. please only specify one");
                 }
 
                 let repo_info =
@@ -1395,8 +1395,8 @@ impl FromStr for MigrateService {
 
 impl MigrateService {
     fn to_api_type(self) -> forgejo_api::structs::MigrateRepoOptionsService {
-        use forgejo_api::structs::MigrateRepoOptionsService as Api;
         use MigrateService as Cli;
+        use forgejo_api::structs::MigrateRepoOptionsService as Api;
         match self {
             Cli::Git => Api::Git,
             Cli::Github => Api::Github,
@@ -1501,7 +1501,9 @@ async fn migrate_repo(
     let service = service.unwrap_or_default();
 
     if service == MigrateService::Git && include.non_base_git() {
-        eyre::bail!("Migrating from a `git` service doesn't support migration items other than LFS. Please specify a different service or remove the included items");
+        eyre::bail!(
+            "Migrating from a `git` service doesn't support migration items other than LFS. Please specify a different service or remove the included items"
+        );
     }
 
     if repo.ends_with("/") {
@@ -1587,10 +1589,10 @@ async fn view_repo(api: &Forgejo, repo: &RepoName) -> eyre::Result<()> {
                 parent.full_name.as_ref().ok_or_eyre("no full name")?
             );
         }
-        if repo.mirror == Some(true) {
-            if let Some(original) = &repo.original_url {
-                println!("Mirror of {original}")
-            }
+        if repo.mirror == Some(true)
+            && let Some(original) = &repo.original_url
+        {
+            println!("Mirror of {original}")
         }
         let desc = repo.description.as_deref().unwrap_or_default();
         // Don't use body::markdown, this is plain text.
@@ -1666,10 +1668,10 @@ async fn view_repo(api: &Forgejo, repo: &RepoName) -> eyre::Result<()> {
         if !first {
             println!();
         }
-        if let Some(external_tracker) = &repo.external_tracker {
-            if let Some(tracker_url) = &external_tracker.external_tracker_url {
-                println!("Issue tracker is at {tracker_url}");
-            }
+        if let Some(external_tracker) = &repo.external_tracker
+            && let Some(tracker_url) = &external_tracker.external_tracker_url
+        {
+            println!("Issue tracker is at {tracker_url}");
         }
 
         if let Some(html_url) = &repo.html_url {

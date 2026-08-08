@@ -3,11 +3,11 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use clap::{Args, Subcommand};
-use eyre::{eyre, OptionExt};
+use eyre::{OptionExt, eyre};
+use forgejo_api::Forgejo;
 use forgejo_api::structs::{
     Comment, CreateIssueCommentOption, CreateIssueOption, EditIssueOption, IssueGetCommentsQuery,
 };
-use forgejo_api::Forgejo;
 
 use crate::repo::{RepoArg, RepoInfo, RepoName};
 
@@ -665,10 +665,10 @@ pub async fn view_issue(repo: &RepoName, api: &Forgejo, id: i64) -> eyre::Result
             StateType::Closed => println!("{bright_red}Closed{reset}"),
         };
 
-        if let Some(ms) = &issue.milestone {
-            if let Some(title) = ms.title.as_deref() {
-                println!("Milestone: {title}");
-            }
+        if let Some(ms) = &issue.milestone
+            && let Some(title) = ms.title.as_deref()
+        {
+            println!("Milestone: {title}");
         }
 
         if let Some(assignees) = &issue.assignees {
@@ -683,11 +683,11 @@ pub async fn view_issue(repo: &RepoName, api: &Forgejo, id: i64) -> eyre::Result
 
         crate::render_label_list(&issue.labels.clone().unwrap_or_default())?;
 
-        if let Some(body) = &issue.body {
-            if !body.is_empty() {
-                println!();
-                println!("{}", crate::markdown(body));
-            }
+        if let Some(body) = &issue.body
+            && !body.is_empty()
+        {
+            println!();
+            println!("{}", crate::markdown(body));
         }
         println!();
 

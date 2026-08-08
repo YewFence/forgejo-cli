@@ -1,14 +1,14 @@
 use std::collections::BTreeMap;
 
 use clap::{Args, Subcommand};
-use eyre::{bail, OptionExt};
+use eyre::{OptionExt, bail};
 use forgejo_api::{
+    Forgejo, ForgejoError,
     structs::{
         ActionArtifact, CreateOrUpdateSecretOption, CreateVariableOption, ListActionArtifactsQuery,
         ListActionRunsQuery, ListActionRunsQueryStatus, ListActionTasksQuery,
         ListActionTasksQueryStatus, RepoGetActionJobLogsQuery, UpdateVariableOption,
     },
-    Forgejo, ForgejoError,
 };
 use hyper::StatusCode;
 

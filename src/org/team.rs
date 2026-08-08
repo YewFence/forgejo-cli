@@ -3,10 +3,10 @@ use std::collections::BTreeMap;
 use clap::{Args, Subcommand};
 use eyre::OptionExt;
 use forgejo_api::{
-    structs::{CreateTeamOption, EditTeamOption},
     Forgejo,
+    structs::{CreateTeamOption, EditTeamOption},
 };
-use futures::{future, TryStreamExt};
+use futures::{TryStreamExt, future};
 
 use crate::SpecialRender;
 
@@ -256,10 +256,10 @@ async fn view_team(
         }
         println!();
 
-        if let Some(description) = &team.description {
-            if !description.is_empty() {
-                println!("\n{}", crate::markdown(description));
-            }
+        if let Some(description) = &team.description
+            && !description.is_empty()
+        {
+            println!("\n{}", crate::markdown(description));
         }
 
         if list_permissions {
