@@ -23,6 +23,7 @@ repository = "https://codeberg.org/Cyborus/forgejo-api"
 [features]
 default = ["reqwest/default-tls"]
 rustls-tls = ["reqwest/rustls-tls"]
+rustls-tls-native-roots = ["reqwest/rustls-tls-native-roots"]
 sync = ["reqwest/blocking"]
 
 [lib]

@@ -36,7 +36,10 @@ The one non-`Option` date field (`EditDeadlineOption.due_date`, a request
 body) is untouched.
 
 `Cargo.toml`: dropped the `[[test]]` targets and dev-dependencies from the
-published manifest because the crate's test suite is not vendored.
+published manifest because the crate's test suite is not vendored. Added a
+`rustls-tls-native-roots` feature forwarding to reqwest so callers can augment
+the bundled WebPKI roots with platform roots and certificates selected through
+`SSL_CERT_FILE`/`SSL_CERT_DIR`.
 
 ## When to remove
 
